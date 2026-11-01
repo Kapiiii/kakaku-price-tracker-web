@@ -261,9 +261,9 @@ export async function handler(req: Request): Promise<Response> {
       const { value, done } = await reader.read();
       if (done) break;
       length += value.length;
-      if (length > 2000000) {
+      if (length > 22000000) {
         await reader.cancel();
-        throw new Error("ファイルは2MB以下にしてください。");
+        throw new Error("読み込みデータは22MB以下にしてください。");
       }
       chunks.push(value);
     }

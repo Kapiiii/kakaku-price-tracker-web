@@ -36,7 +36,7 @@ const sb = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
 });
 let state = null, user = null, demo = false, job = null, processing = false, epoch = 0;
 let tab = "compare", pastId = "", selectedProduct = "", shopSearch = "", fixed = false, range = "all";
-let noticeTimer, prefsTimer, prefsPending = false, prefsChain = Promise.resolve();
+let noticeTimer, prefsTimer, prefsPending = false, prefsInFlight = 0, prefsChain = Promise.resolve();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function notify(message, error = false) {
   const n = $("#notice");
@@ -77,7 +77,12 @@ function coverage(s) {
   return `${s.known} / ${s.count} 商品の価格を取得`;
 }
 async function api(action, values = {}) {
-  const token = (await sb.auth.getSession()).data.session?.access_token;
+  const requestEpoch = epoch, owner = user?.id;
+  const session = (await sb.auth.getSession()).data.session;
+  if (epoch !== requestEpoch || session?.user.id !== owner) {
+    throw new Error("アカウントが切り替わりました。もう一度操作してください。");
+  }
+  const token = session?.access_token;
   if (!token) throw new Error("ログインし直してください。");
   const response = await fetch(`${CONFIG.supabaseUrl}/functions/v1/tracker-api`, {
     method: "POST",
@@ -90,6 +95,7 @@ async function api(action, values = {}) {
     signal: AbortSignal.timeout(115000),
   });
   const result = await response.json().catch(() => ({}));
+  if (epoch !== requestEpoch) throw new Error("アカウントが切り替わりました。もう一度操作してください。");
   if (!response.ok || result.error) {
     throw new Error(
       result.error || result.message || `接続エラー (${response.status})。少し待って再度お試しください。`,
@@ -99,7 +105,7 @@ async function api(action, values = {}) {
 }
 function adopt(next) {
   if (!next) return;
-  if (prefsPending && state) {
+  if ((prefsPending || prefsInFlight) && state) {
     next.excluded = state.excluded;
     next.settings = state.settings;
   }
@@ -124,6 +130,7 @@ async function flushPrefs() {
   if (prefsPending && state && !demo) {
     prefsPending = false;
     const values = { excluded: [...state.excluded], settings: { ...state.settings } }, currentEpoch = epoch;
+    prefsInFlight++;
     prefsChain = prefsChain.catch(() => {}).then(async () => {
       if (epoch !== currentEpoch) return;
       try {
@@ -131,6 +138,8 @@ async function flushPrefs() {
       } catch (e) {
         if (epoch === currentEpoch) prefsPending = true;
         throw e;
+      } finally {
+        if (epoch === currentEpoch) prefsInFlight--;
       }
     });
   }
@@ -297,10 +306,14 @@ function renderCompare() {
             yen(r.current)
           }</div><div class="price-small" title="${esc(r.currentShop)}">${
             esc(r.currentShop)
+          }</div><div class="price-small">初回比 ${
+            delta(r.current !== null && r.initial !== null ? r.current - r.initial : null)
           }</div></td><td class="numeric"><div class="price-main">${
             yen(r.past)
           }</div><div class="price-small">${
             r.past === null ? "対象外・未取得" : "保存時点の価格"
+          }</div><div class="price-small">現在 − 指定 ${
+            delta(r.current !== null && r.past !== null ? r.current - r.past : null)
           }</div></td><td class="numeric"><div class="price-main price-filtered">${
             yen(r.filtered)
           }</div><div class="price-small" title="${esc(r.filteredShop)}">${
@@ -610,6 +623,7 @@ async function action(name) {
     epoch++;
     clearTimeout(prefsTimer);
     prefsPending = false;
+    prefsInFlight = 0;
     state = null;
     job = null;
     processing = false;
@@ -685,8 +699,6 @@ async function action(name) {
       `price-note-${new Date().toISOString().slice(0, 10)}.json`,
       JSON.stringify(
         { format_version: "cloud-1", exported_at: new Date().toISOString(), data: state },
-        null,
-        2,
       ),
       "application/json",
     );
@@ -846,7 +858,7 @@ document.addEventListener("submit", async (event) => {
       notify("商品をリストから削除しました。");
     } else if (form.hasAttribute("data-import")) {
       const file = data.get("file");
-      if (file.size > 1900000) throw new Error("バックアップは1.9MB以下にしてください。");
+      if (file.size > 21000000) throw new Error("バックアップは21MB以下にしてください。");
       const backup = JSON.parse(await file.text());
       importBackup(backup);
       await flushPrefs();
@@ -896,6 +908,7 @@ async function authChange(session) {
   demo = false;
   user = next;
   prefsPending = false;
+  prefsInFlight = 0;
   clearTimeout(prefsTimer);
   $("#modal").close();
   if (!user) {
