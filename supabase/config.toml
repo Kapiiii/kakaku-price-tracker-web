@@ -1,0 +1,4 @@
+project_id = "nicgbsemqltpxyvyoslk"
+
+[functions.tracker-api]
+verify_jwt = true

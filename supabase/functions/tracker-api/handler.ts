@@ -1,0 +1,289 @@
+import { createSupabaseContext } from "npm:@supabase/server@1.9.2";
+import {
+  activeProducts,
+  applyResults,
+  archiveProducts,
+  canonicalURL,
+  clone,
+  importBackup,
+  shopList,
+} from "../../../docs/core.js";
+import { fetchProduct, parseProduct, PriceError } from "../_shared/kakaku.ts";
+
+type Client = any;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export function allowedOrigin(origin: string) {
+  return origin === "https://kapiiii.github.io" || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+}
+async function rpc(admin: Client, name: string, args: Record<string, unknown>) {
+  const { data, error } = await admin.rpc(name, args);
+  if (error) throw new Error(error.message || "データの保存に失敗しました。");
+  return data;
+}
+async function runningJob(admin: Client, owner: string) {
+  const { data, error } = await admin.from("tracker_jobs").select("*").eq("user_id", owner).eq(
+    "status",
+    "running",
+  ).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+function publicJob(job: any) {
+  return job
+    ? {
+      id: job.id,
+      kind: job.kind,
+      status: job.status,
+      done: job.payload.index,
+      total: job.payload.urls.length,
+      created_at: job.created_at,
+      errors: job.payload.results.filter((r: any) => r.error).map((r: any) => ({
+        url: r.url,
+        error: r.error,
+      })),
+    }
+    : null;
+}
+async function readState(admin: Client, owner: string) {
+  return await rpc(admin, "tracker_ensure_state", { p_owner: owner });
+}
+async function mutate(admin: Client, owner: string, transform: (data: any) => any, allowRunning = false) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const row = await readState(admin, owner), state = transform(clone(row.data));
+    const ok = await rpc(admin, "tracker_write_state", {
+      p_owner: owner,
+      p_expected: row.version,
+      p_data: state,
+      p_allow_running: allowRunning,
+    });
+    if (ok) return state;
+  }
+  throw new Error("他の画面で変更されました。画面を再読み込みしてお試しください。");
+}
+function validID(value: unknown): string {
+  if (typeof value !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(value)) {
+    throw new Error("更新IDが正しくありません。");
+  }
+  return value;
+}
+export async function dispatch(
+  admin: Client,
+  owner: string,
+  body: any,
+  productFetcher = fetchProduct,
+): Promise<any> {
+  switch (body.action) {
+    case "get": {
+      const row = await readState(admin, owner);
+      return { state: row.data, job: publicJob(await runningJob(admin, owner)) };
+    }
+    case "preferences": {
+      const state = await mutate(admin, owner, (data) => {
+        if (Array.isArray(body.excluded)) {
+          if (body.excluded.length > 2000) throw new Error("除外ショップが多すぎます。");
+          const known = new Set(shopList(data).map((s: any) => s.key));
+          data.excluded = [
+            ...new Set(body.excluded.filter((key: unknown) => typeof key === "string" && known.has(key))),
+          ];
+        }
+        if (body.settings) {
+          const { interval, max_shops } = body.settings;
+          if (
+            !Number.isInteger(interval) || interval < 3 || interval > 30 || ![10, 15, 20].includes(max_shops)
+          ) throw new Error("取得設定を確認してください。");
+          data.settings = { interval, max_shops };
+        }
+        return data;
+      }, true);
+      return { state };
+    }
+    case "begin": {
+      const { data: state } = await readState(admin, owner);
+      const kind = body.kind;
+      if (!["add", "update"].includes(kind)) throw new Error("操作の種類が正しくありません。");
+      if (kind === "add" && (!Array.isArray(body.urls) || body.urls.length > 100)) {
+        throw new Error("商品URLは一度に100件まで登録できます。");
+      }
+      const existing = new Set(activeProducts(state).map((p: any) => p.url));
+      const urls = kind === "update"
+        ? [...existing]
+        : [...new Set(body.urls.map(canonicalURL))].filter((url) => !existing.has(url));
+      if (!urls.length) {
+        throw new Error("取得対象の商品がありません。登録済みの商品は一括更新をご利用ください。");
+      }
+      if (urls.length > 100 || (kind === "add" && existing.size + urls.length > 100)) {
+        throw new Error("登録中の商品は100件までにしてください。");
+      }
+      const payload = { urls, index: 0, results: [], settings: state.settings };
+      const job = await rpc(admin, "tracker_start_job", { p_owner: owner, p_kind: kind, p_payload: payload });
+      return { job: publicJob(job) };
+    }
+    case "step": {
+      const jobID = validID(body.job_id),
+        job = await rpc(admin, "tracker_claim_step", { p_owner: owner, p_job: jobID });
+      if (job.busy) return { busy: true, retry_after: job.retry_after };
+      if (job.status !== "running") {
+        return { state: (await readState(admin, owner)).data, job: publicJob(job) };
+      }
+      const payload = clone(job.payload), url = payload.urls[payload.index];
+      let stopped = false;
+      if (url) {
+        try {
+          const data = await productFetcher(
+            url,
+            payload.settings.max_shops,
+            payload.settings.interval,
+            async (seconds) => {
+              const delay = await rpc(admin, "tracker_reserve_request", {
+                p_seconds: Math.max(3, Math.ceil(seconds)),
+              });
+              if (delay > 0) await sleep(delay);
+            },
+          );
+          payload.results.push({ url, data });
+        } catch (error) {
+          payload.results.push({
+            url,
+            error: String(error instanceof Error ? error.message : "取得に失敗しました。").slice(0, 1000),
+          });
+          stopped = error instanceof PriceError && error.blocked;
+        }
+        payload.index++;
+      }
+      if (stopped) {
+        while (payload.index < payload.urls.length) {
+          payload.results.push({
+            url: payload.urls[payload.index++],
+            error: "アクセス制限を受けたため、今回の残りの取得を停止しました。",
+          });
+        }
+      }
+      if (payload.index < payload.urls.length) {
+        const ok = await rpc(admin, "tracker_save_step", {
+          p_owner: owner,
+          p_job: jobID,
+          p_token: job.lease_token,
+          p_payload: payload,
+        });
+        if (!ok) throw new Error("更新は中止されたか、別の画面で処理されています。");
+        return { job: publicJob({ ...job, payload }) };
+      }
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const row = await readState(admin, owner),
+          state = applyResults(row.data, payload.results, job.kind, job.created_at);
+        const completedPayload = {
+          ...payload,
+          results: payload.results.filter((r: any) => r.error).map((r: any) => ({
+            url: r.url,
+            error: r.error,
+          })),
+        };
+        const ok = await rpc(admin, "tracker_finish_job", {
+          p_owner: owner,
+          p_job: jobID,
+          p_token: job.lease_token,
+          p_expected: row.version,
+          p_data: state,
+          p_payload: completedPayload,
+        });
+        if (ok) return { state, job: publicJob({ ...job, payload, status: "completed" }) };
+      }
+      throw new Error("変更が重なりました。更新を再開してください。");
+    }
+    case "cancel": {
+      await rpc(admin, "tracker_cancel_job", { p_owner: owner, p_job: validID(body.job_id) });
+      return await dispatch(admin, owner, { action: "get" });
+    }
+    case "archive": {
+      if (!Array.isArray(body.ids) || !body.ids.length || body.ids.length > 100) {
+        throw new Error("削除する商品を選択してください。");
+      }
+      return { state: await mutate(admin, owner, (state) => archiveProducts(state, body.ids.map(String))) };
+    }
+    case "html": {
+      if (typeof body.html !== "string" || body.html.length > 1000000) {
+        throw new Error("保存HTMLは1MB以下にしてください。");
+      }
+      const url = canonicalURL(body.url);
+      return {
+        state: await mutate(admin, owner, (state) => {
+          if (
+            !state.products.some((p: any) => p.url === url && !p.archived_at) &&
+            activeProducts(state).length >= 100
+          ) throw new Error("登録中の商品は100件までです。");
+          const data = parseProduct(body.html, url, state.settings.max_shops, "html");
+          return applyResults(state, [{ url, data }], "import");
+        }),
+      };
+    }
+    case "import": {
+      if (body.confirm !== true) throw new Error("バックアップの復元を確認してください。");
+      const restored = importBackup(body.backup);
+      if (activeProducts(restored).length > 100) throw new Error("登録中の商品は100件までです。");
+      return { state: await mutate(admin, owner, () => restored) };
+    }
+    default:
+      throw new Error("操作を選択してください。");
+  }
+}
+export async function handler(req: Request): Promise<Response> {
+  const origin = req.headers.get("Origin") ?? "";
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Vary": "Origin",
+  };
+  if (origin && !allowedOrigin(origin)) {
+    return Response.json({ error: "このサイトからの接続は許可されていません。" }, { status: 403, headers });
+  }
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  headers["Access-Control-Allow-Headers"] = "authorization,apikey,content-type,x-client-info";
+  headers["Access-Control-Allow-Methods"] = "POST,OPTIONS";
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers });
+  if (req.method !== "POST") {
+    return Response.json({ error: "POSTを使用してください。" }, { status: 405, headers });
+  }
+  try {
+    if (!req.headers.get("Authorization")?.startsWith("Bearer ")) {
+      return Response.json({ error: "ログインが必要です。" }, { status: 401, headers });
+    }
+    const { data: ctx, error } = await createSupabaseContext(req, { auth: "user" });
+    if (error || !ctx) {
+      return Response.json({ error: "ログインの有効期限を確認してください。" }, { status: 401, headers });
+    }
+    const owner = String(ctx.userClaims?.id ?? ctx.jwtClaims?.sub ?? "");
+    validID(owner);
+    const reader = req.body?.getReader();
+    if (!reader) throw new Error("リクエストが空です。");
+    let length = 0;
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      length += value.length;
+      if (length > 2000000) {
+        await reader.cancel();
+        throw new Error("ファイルは2MB以下にしてください。");
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const c of chunks) {
+      bytes.set(c, offset);
+      offset += c.length;
+    }
+    const body = JSON.parse(new TextDecoder().decode(bytes));
+    const result = await dispatch(ctx.supabaseAdmin, owner, body);
+    return Response.json(result, { headers });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "処理に失敗しました。";
+    if (/tracker_.*(does not exist|schema cache)|Could not find.*tracker_/.test(message)) {
+      return Response.json({ error: "データベースの初期設定が必要です。管理者にご連絡ください。" }, {
+        status: 503,
+        headers,
+      });
+    }
+    return Response.json({ error: message.slice(0, 1000) }, { status: 400, headers });
+  }
+}

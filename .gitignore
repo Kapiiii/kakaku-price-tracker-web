@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+*.sqlite3*
+supabase/.temp/
+coverage/
+DEPLOY_FUNCTION.js
