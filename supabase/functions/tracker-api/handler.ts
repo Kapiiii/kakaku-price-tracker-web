@@ -10,7 +10,9 @@ import {
   INITIAL_POINT,
   shopList,
 } from "../../../docs/core.js";
-import { fetchProduct, parseProduct, PriceError } from "../_shared/kakaku.ts";
+import { fetchCategory, fetchProduct, parseProduct, PriceError } from "../_shared/kakaku.ts";
+import { advanceFallback } from "../_shared/fallback-step.ts";
+import { categoryURL, productFallbackURL } from "../../../docs/fallback.js";
 
 type Client = any;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -41,6 +43,13 @@ function publicJob(job: any) {
       created_at: job.created_at,
       automatic: job.origin === "daily",
       scheduled_date: job.scheduled_date ?? null,
+      fallback: job.payload.pendingFallback
+        ? {
+          name: job.payload.pendingFallback.original_name,
+          checked: job.payload.pendingFallback.index,
+          total: job.payload.pendingFallback.candidates?.length ?? null,
+        }
+        : null,
       errors: job.payload.results.filter((r: any) => r.error).map((r: any) => ({
         url: r.url,
         error: r.error,
@@ -75,6 +84,7 @@ export async function dispatch(
   owner: string,
   body: any,
   productFetcher = fetchProduct,
+  categoryFetcher = fetchCategory,
 ): Promise<any> {
   switch (body.action) {
     case "get": {
@@ -119,6 +129,20 @@ export async function dispatch(
       }, true);
       return { state };
     }
+    case "fallback-preferences": {
+      const mode = body.mode;
+      if (!["auto", "custom", "off"].includes(mode)) throw new Error("代替価格の条件を確認してください。");
+      const url = mode === "custom" ? categoryURL(body.url) : null;
+      return {
+        state: await mutate(admin, owner, (state) => {
+          const product = activeProducts(state).find((p: any) => p.id === body.product_id);
+          if (!product) throw new Error("登録商品が見つかりません。");
+          product.fallback_mode = mode;
+          product.fallback_url = url;
+          return state;
+        }),
+      };
+    }
     case "begin": {
       const { data: state } = await readState(admin, owner);
       const kind = body.kind;
@@ -149,28 +173,65 @@ export async function dispatch(
       }
       const payload = clone(job.payload), url = payload.urls[payload.index];
       let stopped = false;
-      if (url) {
+      const reserve = async (seconds: number) => {
+        const delay = await rpc(admin, "tracker_reserve_request", {
+          p_seconds: Math.max(3, Math.ceil(seconds)),
+        });
+        if (delay > 0) await sleep(delay);
+      };
+      if (payload.pendingFallback) {
+        const result = await advanceFallback(
+          payload.pendingFallback,
+          payload.settings,
+          reserve,
+          productFetcher,
+          categoryFetcher,
+        );
+        stopped = result.stopped;
+        if (result.done) {
+          payload.results.push(result.result);
+          payload.pendingFallback = null;
+          payload.index++;
+        }
+      } else if (url) {
         try {
           const data = await productFetcher(
             url,
             payload.settings.max_shops,
             payload.settings.interval,
-            async (seconds) => {
-              const delay = await rpc(admin, "tracker_reserve_request", {
-                p_seconds: Math.max(3, Math.ceil(seconds)),
-              });
-              if (delay > 0) await sleep(delay);
-            },
+            reserve,
           );
           payload.results.push({ url, data });
         } catch (error) {
-          payload.results.push({
-            url,
-            error: String(error instanceof Error ? error.message : "取得に失敗しました。").slice(0, 1000),
-          });
           stopped = error instanceof PriceError && error.blocked;
+          const message = String(error instanceof Error ? error.message : "取得に失敗しました。").slice(
+            0,
+            1000,
+          );
+          const metadata = error instanceof PriceError ? error.metadata : null;
+          const state = (await readState(admin, owner)).data;
+          const product = state.products.find((p: any) => p.url === url);
+          const searchURL = !stopped &&
+            productFallbackURL({
+              ...product,
+              ...(metadata?.category_url ? { auto_fallback_url: metadata.category_url } : {}),
+              name: metadata?.name || product?.name,
+            });
+          if (searchURL) {
+            payload.pendingFallback = {
+              url,
+              search_url: searchURL,
+              error: message,
+              metadata,
+              original_name: metadata?.name || product?.name || url.split("/").at(-2),
+              image_url: product?.image_url ?? null,
+              index: 0,
+              failed: 0,
+              offers: [],
+            };
+          } else payload.results.push({ url, error: message, metadata });
         }
-        payload.index++;
+        if (!payload.pendingFallback) payload.index++;
       }
       if (stopped) {
         while (payload.index < payload.urls.length) {
@@ -180,7 +241,7 @@ export async function dispatch(
           });
         }
       }
-      if (payload.index < payload.urls.length) {
+      if (payload.pendingFallback || payload.index < payload.urls.length) {
         const ok = await rpc(admin, "tracker_save_step", {
           p_owner: owner,
           p_job: jobID,

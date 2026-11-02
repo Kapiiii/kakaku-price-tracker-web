@@ -1,10 +1,11 @@
 import { parseHTML } from "npm:linkedom@0.18.14";
 import robotsParser from "npm:robots-parser@3.0.1";
 import { canonicalURL, safeURL, validateData } from "../../../docs/core.js";
+import { categoryURL, FALLBACK_LIMIT, inferredCategory } from "../../../docs/fallback.js";
 
 export const USER_AGENT = "PriceNoteTracker/1.0 (personal price comparison)";
 export class PriceError extends Error {
-  constructor(message: string, public blocked = false) {
+  constructor(message: string, public blocked = false, public metadata: any = null) {
     super(message);
   }
 }
@@ -34,7 +35,11 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
   const url = canonicalURL(inputURL);
   const { document: doc } = parseHTML(html);
   const title = text(doc.querySelector("title"));
-  if (/captcha|access denied|just a moment|アクセスが集中|アクセス制限|認証が必要/i.test(title)) {
+  if (
+    /captcha|access denied|just a moment|アクセスが集中|アクセス制限|認証が必要/i.test(
+      title + " " + text(doc.querySelector("title")),
+    )
+  ) {
     throw new PriceError("認証・アクセス制限ページのため、今回の取得を停止しました。", true);
   }
   const canonical = doc.querySelector('link[rel="canonical"][href],meta[property="og:url"][content]');
@@ -77,6 +82,14 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
   if (Array.isArray(image)) image = image[0];
   if (image && typeof image === "object") image = image.url;
   image = image || doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
+  const metadata = {
+    name,
+    image_url: safeURL(image) || null,
+    category_url: inferredCategory(
+      name + " " + String(selected[0]?.description ?? "") + " " +
+        text(doc.querySelector("#specBox,#specTbl,.p-specTable")),
+    ),
+  };
   const offers: any[] = [];
   const selectors = [
     [
@@ -157,9 +170,12 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
   if (!ordered.length) {
     throw new PriceError(
       "ショップ別価格を取得できません。個別商品のURL、販売状況、または保存HTMLを確認してください。",
+      false,
+      metadata,
     );
   }
   return validateData({
+    ...metadata,
     name,
     image_url: image,
     offers: ordered,
@@ -167,14 +183,13 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
     fetched_at: new Date().toISOString(),
   });
 }
-export async function fetchProduct(
+async function fetchKakakuHTML(
   url: string,
-  maxShops: number,
   interval: number,
   reserve: (seconds: number) => Promise<void>,
   fetcher: typeof fetch = fetch,
 ) {
-  const normalized = canonicalURL(url);
+  const normalized = url.includes("/itemlist.aspx") ? categoryURL(url) : canonicalURL(url);
   async function get(target: string) {
     await reserve(interval);
     let response: Response;
@@ -239,5 +254,55 @@ export async function fetchProduct(
     throw new PriceError("robots.txtで自動取得が許可されていません。", true);
   }
   interval = Math.max(interval, robots.getCrawlDelay(USER_AGENT) || 0);
-  return parseProduct(decodeHTML(await get(normalized)), normalized, maxShops);
+  return decodeHTML(await get(normalized));
+}
+export async function fetchProduct(
+  url: string,
+  maxShops: number,
+  interval: number,
+  reserve: (seconds: number) => Promise<void>,
+  fetcher: typeof fetch = fetch,
+) {
+  return parseProduct(await fetchKakakuHTML(url, interval, reserve, fetcher), url, maxShops);
+}
+export function parseCategory(html: string, inputURL: string) {
+  const url = categoryURL(inputURL), { document: doc } = parseHTML(html);
+  const title = text(doc.querySelector("h1")) || text(doc.querySelector("title"));
+  if (
+    /captcha|access denied|just a moment|アクセスが集中|アクセス制限|認証が必要/i.test(
+      title + " " + text(doc.querySelector("title")),
+    )
+  ) {
+    throw new PriceError("代替候補の検索でアクセス制限を受けたため停止しました。", true);
+  }
+  const names = new Map<string, string>();
+  for (const anchor of doc.querySelectorAll(".ckitemLink a[href]")) {
+    try {
+      names.set(canonicalURL(new URL(anchor.getAttribute("href")!, url).href), text(anchor));
+    } catch { /* 商品以外は使わない */ }
+  }
+  const candidates = new Map<string, any>();
+  for (const anchor of doc.querySelectorAll(".td-price .pryen a[href]")) {
+    try {
+      const target = canonicalURL(new URL(anchor.getAttribute("href")!, url).href),
+        amount = price(text(anchor));
+      if (amount && names.has(target)) {
+        candidates.set(target, { url: target, name: names.get(target), price: amount });
+      }
+    } catch { /* 不正なリンクを使わない */ }
+  }
+  if (!candidates.size) throw new PriceError("指定条件の一覧から価格のある代替候補を取得できませんでした。");
+  return {
+    condition: title.slice(0, 500),
+    candidates: [...candidates.values()].sort((a, b) => a.price - b.price).slice(0, FALLBACK_LIMIT),
+    truncated: candidates.size > FALLBACK_LIMIT || !!doc.querySelector('a[href*="pdf_pg=2"]'),
+  };
+}
+export async function fetchCategory(
+  url: string,
+  interval: number,
+  reserve: (seconds: number) => Promise<void>,
+  fetcher: typeof fetch = fetch,
+) {
+  return parseCategory(await fetchKakakuHTML(url, interval, reserve, fetcher), url);
 }

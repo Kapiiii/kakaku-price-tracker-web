@@ -171,6 +171,74 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     await db.exec("set role service_role;");
     assert((await db.query("select public.tracker_ensure_state($1) as state", [bob])).rows.length === 1);
     await db.exec("reset role;");
+    const originalProduct = done.state.products[0];
+    const category = "https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499&pdf_so=p1";
+    await rejects(() =>
+      dispatch(admin, bob, {
+        action: "fallback-preferences",
+        product_id: originalProduct.id,
+        mode: "custom",
+        url: category,
+      })
+    );
+    await rejects(() =>
+      dispatch(admin, alice, {
+        action: "fallback-preferences",
+        product_id: originalProduct.id,
+        mode: "custom",
+        url: "http://127.0.0.1/",
+      })
+    );
+    await dispatch(admin, alice, {
+      action: "fallback-preferences",
+      product_id: originalProduct.id,
+      mode: "custom",
+      url: category,
+    });
+    equal((await get(alice)).products[0].fallback_url, category);
+    await db.query("update public.tracker_jobs set created_at=now()-interval '1 minute' where user_id=$1", [
+      alice,
+    ]);
+    const alternativeJob = await dispatch(admin, alice, { action: "begin", kind: "update" });
+    const candidateURL = "https://kakaku.com/item/K0000000003/";
+    const alternativeFetcher = async (url: string) => {
+      if (url !== candidateURL) throw new Error("販売店なし");
+      return {
+        ...await prices(),
+        name: "代替RTX 5080",
+        offers: [{ shop_key: "a", shop_name: "店舗A", price: 700 }, {
+          shop_key: "b",
+          shop_name: "店舗B",
+          price: 850,
+        }],
+      };
+    };
+    const categoryFetcher = async () => ({
+      condition: "RTX 5080",
+      truncated: false,
+      candidates: [{ url: candidateURL, name: "代替RTX 5080", price: 700 }],
+    });
+    const step = () =>
+      dispatch(
+        admin,
+        alice,
+        { action: "step", job_id: alternativeJob.job.id },
+        alternativeFetcher as any,
+        categoryFetcher as any,
+      );
+    const searching = await step();
+    equal(searching.job.done, 0);
+    assert(searching.job.fallback);
+    equal((await get(alice)).captures.length, 2);
+    await step(); // 一覧を保存。別のリクエストで次の候補へ進める。
+    const collecting = await step();
+    equal(collecting.job.done, 1);
+    const complete = await step();
+    equal(complete.job.status, "completed");
+    equal(complete.state.captures.at(-1).source, "fallback");
+    equal(complete.state.products[0].name, "テスト商品");
+    equal(comparison(complete.state)[0].filtered, 850);
+    equal(complete.state.settings.comparison_point, "initial");
   } finally {
     await db.close();
   }

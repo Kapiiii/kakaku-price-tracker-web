@@ -620,6 +620,15 @@ th.numeric {
 .price-filtered {
   color: var(--green);
 }
+.alternative {
+  white-space: normal;
+  max-width: 210px;
+}
+.fallback-settings {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  max-width: 740px;
+}
 .tag {
   display: inline-block;
   border-radius: 4px;

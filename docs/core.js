@@ -1,3 +1,4 @@
+import { categoryURL, optionalCategory, priceBasis } from "./fallback.js";
 export const nowISO = () => new Date().toISOString();
 export const uid = () => crypto.randomUUID();
 export const clone = (value) => structuredClone(value);
@@ -86,7 +87,10 @@ export const dateLabel = (value) => {
     : "未取得";
 };
 export function comparableDelta(rows, current, reference) {
-  const pairs = rows.filter((r) => r[current] !== null && r[reference] !== null);
+  const pairs = rows.filter((r) =>
+    r[current] !== null && r[reference] !== null &&
+    r[`${current}_basis`] === r[`${reference}_basis`]
+  );
   return {
     amount: pairs.length || !rows.length ? pairs.reduce((v, r) => v + r[current] - r[reference], 0) : null,
     count: pairs.length,
@@ -114,6 +118,10 @@ export function comparison(state, pastId = comparisonPoint(state)) {
       url: p.url,
       image_url: p.image_url,
       initial: first?.price ?? null,
+      initial_basis: priceBasis(initial),
+      current_basis: priceBasis(c),
+      past_basis: priceBasis(pc),
+      past_is_fallback: pc?.source === "fallback",
       current: cheap?.price ?? null,
       past: previous?.price ?? null,
       filtered: filtered?.price ?? null,
@@ -124,6 +132,8 @@ export function comparison(state, pastId = comparisonPoint(state)) {
       carried: !!c && current.get(String(p.id))?.status === "error",
       error: current.get(String(p.id))?.error ?? "",
       capture: c,
+      currentOffer: cheap,
+      filteredOffer: filtered,
       initial_fetched_at: initial?.fetched_at ?? null,
     };
   });
@@ -164,6 +174,15 @@ export function applyResults(input, results, kind = "update", started = nowISO()
       state.products.push(product);
     }
     product.archived_at = null;
+    if (result.metadata) {
+      if (typeof result.metadata.name === "string" && result.metadata.name.trim()) {
+        product.name = result.metadata.name.slice(0, 500);
+      }
+      if (safeURL(result.metadata.image_url)) product.image_url = safeURL(result.metadata.image_url);
+      if (optionalCategory(result.metadata.category_url)) {
+        product.auto_fallback_url = categoryURL(result.metadata.category_url);
+      }
+    }
     if (result.data) {
       const capture = {
         ...clone(result.data),
@@ -175,8 +194,15 @@ export function applyResults(input, results, kind = "update", started = nowISO()
       state.captures.push(capture);
       product.name = capture.name;
       product.image_url = capture.image_url ?? null;
+      if (optionalCategory(capture.category_url)) {
+        product.auto_fallback_url = categoryURL(capture.category_url);
+      }
       if (fresh) product.initial_capture_id = capture.id;
-      changed.set(String(product.id), { capture_id: capture.id, status: "fresh", error: "" });
+      changed.set(String(product.id), {
+        capture_id: capture.id,
+        status: "fresh",
+        error: capture.fallback?.original_error ?? "",
+      });
     } else {
       changed.set(String(product.id), {
         capture_id: latestCapture(state, product.id)?.id ?? null,
@@ -200,15 +226,16 @@ export function basketHistory(state, fixed = false) {
   return state.snapshots.map((snapshot) => {
     const items = itemMap(snapshot), members = fixed ? membersFixed : [...items.keys()].sort();
     const raw = [], filtered = [], rawIds = [], filteredIds = [];
-    let carried = 0;
+    let carried = 0, estimates = 0;
     for (const pid of members) {
       const item = items.get(pid), capture = captures.get(String(item?.capture_id));
       const valid = capture && String(capture.product_id) === pid ? capture : null;
       const a = minimum(valid), b = minimum(valid, state.excluded);
       raw.push(a?.price ?? null);
       filtered.push(b?.price ?? null);
-      if (a) rawIds.push(pid);
-      if (b) filteredIds.push(pid);
+      if (a) rawIds.push([pid, priceBasis(valid)]);
+      if (b) filteredIds.push([pid, priceBasis(valid)]);
+      if (a && valid.source === "fallback") estimates++;
       if (a && ["error", "carried"].includes(item?.status)) carried++;
     }
     const signature = JSON.stringify(members),
@@ -227,6 +254,7 @@ export function basketHistory(state, fixed = false) {
       value,
       filteredValue,
       carried,
+      estimates,
       delta: same && value !== null && previous.value !== null ? value - previous.value : null,
       filteredDelta: sameFiltered && filteredValue !== null && previous.filteredValue !== null
         ? filteredValue - previous.filteredValue
@@ -272,7 +300,20 @@ export function validateData(data) {
       !Number.isSafeInteger(o.price) || o.price <= 0 || o.price >= 1e12
     ) throw new Error("ショップ価格の形式が正しくありません。");
     keys.add(o.shop_key);
+    const provenance = data.source === "fallback"
+      ? {
+        product_url: canonicalURL(o.product_url),
+        product_name: String(o.product_name ?? "").slice(0, 500),
+        product_fetched_at: Number.isFinite(+new Date(o.product_fetched_at))
+          ? new Date(o.product_fetched_at).toISOString()
+          : null,
+      }
+      : {};
+    if (data.source === "fallback" && !provenance.product_name) {
+      throw new Error("代替商品の情報がありません。");
+    }
     return {
+      ...provenance,
       shop_key: o.shop_key,
       shop_name: o.shop_name,
       price: o.price,
@@ -281,11 +322,23 @@ export function validateData(data) {
       stock_text: String(o.stock_text ?? "").slice(0, 200),
     };
   }).sort((a, b) => a.price - b.price);
+  const fallback = data.source === "fallback"
+    ? {
+      search_url: categoryURL(data.fallback?.search_url),
+      condition: String(data.fallback?.condition ?? "指定条件").slice(0, 500),
+      checked: Math.max(0, Math.min(20, Number(data.fallback?.checked) || 0)),
+      failed: Math.max(0, Math.min(20, Number(data.fallback?.failed) || 0)),
+      truncated: !!data.fallback?.truncated,
+      original_error: String(data.fallback?.original_error ?? "").slice(0, 1000),
+    }
+    : null;
   return {
+    ...(fallback ? { fallback } : {}),
+    category_url: optionalCategory(data.category_url),
     name: data.name.trim(),
     image_url: safeURL(data.image_url) || null,
     offers,
-    source: ["live", "html", "demo", "legacy"].includes(data.source) ? data.source : "legacy",
+    source: ["live", "html", "demo", "legacy", "fallback"].includes(data.source) ? data.source : "legacy",
     fetched_at: Number.isFinite(+new Date(data.fetched_at))
       ? new Date(data.fetched_at).toISOString()
       : nowISO(),
@@ -344,6 +397,9 @@ export function importBackup(input) {
       created_at: new Date(p.created_at).toISOString(),
       archived_at: p.archived_at ? new Date(p.archived_at).toISOString() : null,
       initial_capture_id: p.initial_capture_id == null ? null : String(p.initial_capture_id),
+      fallback_mode: ["off", "custom"].includes(p.fallback_mode) ? p.fallback_mode : "auto",
+      fallback_url: p.fallback_mode === "custom" ? categoryURL(p.fallback_url) : null,
+      auto_fallback_url: optionalCategory(p.auto_fallback_url),
     };
   });
   state.captures = state.captures.map((c) => {

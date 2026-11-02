@@ -1,6 +1,7 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
+import { categoryURL, productFallbackURL, RTX5080_URL } from "./fallback.js";
 import {
   activeProducts,
   applyResults,
@@ -86,6 +87,42 @@ function amount(s) {
 }
 function coverage(s) {
   return `${s.known} / ${s.count} 商品の価格を取得`;
+}
+function alternative(offer) {
+  return offer?.product_url
+    ? `<div class="price-small alternative"><a href="${
+      esc(safeURL(offer.product_url))
+    }" target="_blank" rel="noopener noreferrer" title="${esc(offer.product_name)}">${
+      esc(offer.product_name)
+    } ↗</a></div>`
+    : "";
+}
+function fallbackSettings(product) {
+  const mode = product.fallback_mode === "custom"
+    ? (product.fallback_url === RTX5080_URL ? "rtx5080" : "custom")
+    : product.fallback_mode ?? "auto";
+  return `<form class="fallback-settings section-space" data-fallback-product="${
+    esc(product.id)
+  }"><h3>代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定はRTX 5080に対応しています。ほかのGPUや商品は、価格.comで条件を絞った製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
+    [["auto", "自動判定（RTX 5080）"], ["rtx5080", "RTX 5080搭載モデル（メーカー問わず）"], [
+      "custom",
+      "絞り込み一覧を指定",
+    ], ["off", "代替価格を使わない"]].map(([value, label]) =>
+      `<option value="${value}" ${value === mode ? "selected" : ""}>${label}</option>`
+    ).join("")
+  }</select></label><label class="field">条件を絞った製品一覧のURL<input name="fallback_url" type="url" value="${
+    esc(product.fallback_url ?? "")
+  }" ${
+    mode === "custom" ? "required" : "disabled"
+  } placeholder="https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499"></label><p class="help">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
+    job ? "disabled" : ""
+  }>代替条件を保存</button><p class="help">現在の検索条件：${
+    productFallbackURL(product)
+      ? `<a href="${
+        esc(productFallbackURL(product))
+      }" target="_blank" rel="noopener noreferrer">候補一覧を開く ↗</a>`
+      : "未指定・自動判定待ち"
+  }</p></form>`;
 }
 async function api(action, values = {}) {
   const requestEpoch = epoch, owner = user?.id;
@@ -175,7 +212,7 @@ function shell() {
       ).join("")
     }</nav></div><div class="exclusion-box" id="exclusions"></div><div class="sidebar-bottom"><div class="row between"><span class="side-label">MY LIST</span><span class="count">${
       activeProducts(state).length
-    } 商品</span></div><p class="side-note">取得に失敗した商品は、最後に取得できた価格を引き継ぎます。</p></div></aside><main class="workspace">${
+    } 商品</span></div><p class="side-note">取得に失敗した商品は、条件があれば代替参考価格を探し、取得できなければ前回価格を引き継ぎます。</p></div></aside><main class="workspace">${
       demo
         ? '<div class="demo-banner">デモモード — 架空の商品・価格です。実際の商品を登録するにはログインしてください。</div>'
         : ""
@@ -282,6 +319,8 @@ function renderJob() {
       job.automatic ? "毎日の自動更新" : kindName(job.kind)
     } ${job.done} / ${job.total} 商品 ${
       processing ? "を取得中…" : job.automatic ? "をサーバーで順次取得中" : "の取得を保存済み"
+    }${
+      job.fallback ? ` · 代替候補を確認中 ${job.fallback.checked} / ${job.fallback.total ?? "検索中"}` : ""
     }</strong><div class="row">${
       !processing ? '<button class="small-button primary" data-action="resume">更新を再開</button>' : ""
     }<button class="small-button" data-action="cancel">中止</button></div></div><progress class="progress" value="${job.done}" max="${job.total}"></progress><small>完了すると価格と総額の履歴をまとめて保存します。画面を閉じた場合は、ここから再開できます。</small>${
@@ -320,6 +359,7 @@ function renderCompare() {
     sums = ["past", "current", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
     pastDiff = comparableDelta(rows, "current", "past");
   const latest = state.snapshots.at(-1), carried = rows.filter((r) => r.carried).length;
+  const estimates = rows.filter((r) => r.capture?.source === "fallback").length;
   $("#content").innerHTML = `<div class="cards">${
     ["指定時点の総額", "現在の最安総額", "ショップ除外後の総額"].map((label, i) =>
       `<article class="metric ${
@@ -328,17 +368,31 @@ function renderCompare() {
         i === 0 ? snapshotSelect() : `<span aria-hidden="true">${["", "↘", "⚑"][i]}</span>`
       }</div><div class="metric-value">${amount(sums[i])}</div><div class="metric-note">${
         i === 1
-          ? `${delta(pastDiff.amount)} ${pastId === INITIAL_POINT ? "初回登録時点比" : "指定時点比"}${
-            pastDiff.count < pastDiff.total ? ` (${pastDiff.count}商品で比較)` : ""
-          }`
+          ? pastDiff.count === 0 && rows.length
+            ? "差額比較できる価格がありません"
+            : `${delta(pastDiff.amount)} ${pastId === INITIAL_POINT ? "初回登録時点比" : "指定時点比"}${
+              pastDiff.count < pastDiff.total ? ` (${pastDiff.count}商品で比較)` : ""
+            }`
           : i === 2
           ? `${state.excluded.length} ショップを除外`
           : pastId === INITIAL_POINT
           ? "各商品の登録時点の価格を合算"
           : esc(pointLabel())
-      }<br>${coverage(sums[i])}</div></article>`
+      }<br>${coverage(sums[i])}${
+        i === 0
+          ? rows.some((r) => r.past_is_fallback)
+            ? " · 代替参考価格を含む"
+            : ""
+          : estimates
+          ? ` · 代替 ${estimates}商品`
+          : ""
+      }</div></article>`
     ).join("")
   }</div>${
+    estimates
+      ? `<div class="banner warning">${estimates}商品に、条件が合う別商品の「代替参考価格」を使用しています。取得した候補・ショップ内の最安値です。商品名と取得元は詳細から確認できます。</div>`
+      : ""
+  }${
     carried
       ? `<div class="banner warning">${carried}商品の価格は、最後に取得できた値を表示しています。「前回価格」の商品から取得日時と理由を確認できます。</div>`
       : ""
@@ -364,27 +418,37 @@ function renderCompare() {
               : r.capture
               ? '<span class="tag">取得済み</span>'
               : '<span class="tag warn">未取得</span>'
-          }${r.capture?.source === "html" ? '<span class="tag">保存HTML</span>' : ""}${
+          }${r.capture?.source === "fallback" ? '<span class="tag warn">代替参考価格</span>' : ""}${
+            r.capture?.source === "html" ? '<span class="tag">保存HTML</span>' : ""
+          }${
             r.capture?.offers.length ?? 0
           } ショップ</div></div></div></td><td class="numeric"><div class="price-main">${
             yen(r.past)
           }</div><div class="price-small">${
-            r.past === null ? "対象外・未取得" : pastId === INITIAL_POINT ? "登録時の価格" : "保存時点の価格"
+            r.past === null
+              ? "対象外・未取得"
+              : r.past_is_fallback
+              ? "代替参考価格"
+              : pastId === INITIAL_POINT
+              ? "登録時の価格"
+              : "保存時点の価格"
           }</div></td><td class="numeric"><div class="price-main">${
             yen(r.current)
-          }</div><div class="price-small" title="${esc(r.currentShop)}">${
-            esc(r.currentShop)
-          }</div><div class="price-small">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
-            delta(r.current !== null && r.past !== null ? r.current - r.past : null)
+          }</div><div class="price-small" title="${esc(r.currentShop)}">${esc(r.currentShop)}</div>${
+            alternative(r.currentOffer)
+          }<div class="price-small">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
+            delta(
+              r.current !== null && r.past !== null && r.current_basis === r.past_basis
+                ? r.current - r.past
+                : null,
+            )
           }</div></td><td class="numeric"><div class="price-main price-filtered">${
             yen(r.filtered)
-          }</div><div class="price-small" title="${esc(r.filteredShop)}">${
-            esc(r.filteredShop)
-          }</div></td><td><button class="ghost small-button" data-product="${
-            esc(r.id)
-          }">詳細 →</button></td></tr>`
+          }</div><div class="price-small" title="${esc(r.filteredShop)}">${esc(r.filteredShop)}</div>${
+            alternative(r.filteredOffer)
+          }</td><td><button class="ghost small-button" data-product="${esc(r.id)}">詳細 →</button></td></tr>`
         ).join("")
-      }</tbody></table></div><div class="table-foot">${rows.length} 商品 · 小計は価格のある商品のみの合算です。差額は両方の時点に価格がある同じ商品で比較します。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</div>`
+      }</tbody></table></div><div class="table-foot">${rows.length} 商品 · 小計は価格のある商品のみの合算です。差額は両方の時点で同じ価格種別の商品で比較します。実価格と代替参考価格の切り替わりは値下がりとして計算しません。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</div>`
       : emptyView()
   }</section>${
     state.snapshots.length > 1
@@ -480,7 +544,7 @@ function renderHistory() {
     comparable ? delta(last.value - first.value) : "—"
   }</strong><small>${
     comparable ? "同じ商品・取得範囲で比較" : "商品構成・取得範囲が異なる場合は比較しません"
-  }</small></div><div class="history-stat">価格の記録<strong>${records.length} <small>回</small></strong><small>ボタンを押して更新した履歴</small></div></div><section class="panel"><div class="panel-header"><div><h2>総額の推移</h2><p>線が途切れる箇所は商品構成・価格取得範囲が変わった時点です。</p></div><div class="toolbar"><select aria-label="集計対象" data-scope><option value="all" ${
+  }</small></div><div class="history-stat">価格の記録<strong>${records.length} <small>回</small></strong><small>ボタンを押して更新した履歴</small></div></div><section class="panel"><div class="panel-header"><div><h2>総額の推移</h2><p>線が途切れる箇所は商品構成・取得範囲・実価格と代替参考価格が切り替わった時点です。</p></div><div class="toolbar"><select aria-label="集計対象" data-scope><option value="all" ${
     !fixed ? "selected" : ""
   }>当時の商品構成</option><option value="fixed" ${
     fixed ? "selected" : ""
@@ -498,7 +562,7 @@ function renderHistory() {
         delta(r.delta)
       }</td><td class="numeric">${amount(r.filtered)}</td><td><small>${r.raw.known}/${r.raw.count}商品${
         r.carried ? ` · 前回価格 ${r.carried}件` : ""
-      }${
+      }${r.estimates ? ` · 代替参考価格 ${r.estimates}件` : ""}${
         r.changed ? " · 商品構成変更" : ""
       }</small></td><td><button class="ghost small-button" data-snapshot="${
         esc(r.id)
@@ -528,10 +592,28 @@ function renderProduct() {
     } / 初回登録：${esc(dateLabel(p.created_at))}</p>${
       row?.error
         ? `<div class="banner warning">${
-          capture ? "最後に取得できた価格を使用しています。" : "まだ価格を取得できていません。"
+          capture?.source === "fallback"
+            ? "登録商品の価格を取得できないため、代替参考価格を使用しています。"
+            : capture
+            ? "最後に取得できた価格を使用しています。"
+            : "まだ価格を取得できていません。"
         }<br>${esc(row.error)}</div>`
         : ""
-    }</div></section><div class="details-grid"><section class="panel"><div class="panel-header"><h2>最新のショップ別価格</h2><span class="count">${
+    }${
+      capture?.source === "fallback"
+        ? `<div class="banner warning"><strong>代替参考価格</strong><p>${
+          esc(capture.fallback.condition)
+        }</p><p>確認 ${capture.fallback.checked}候補・取得失敗 ${capture.fallback.failed}候補${
+          capture.fallback.truncated ? " · 一部の候補のみ確認" : ""
+        }。取得できた候補内でショップごとの最安価格を採用しています。</p><a href="${
+          esc(capture.fallback.search_url)
+        }" target="_blank" rel="noopener noreferrer">検索条件を開く ↗</a></div>`
+        : ""
+    }${
+      fallbackSettings(p)
+    }</div></section><div class="details-grid"><section class="panel"><div class="panel-header"><h2>${
+      capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
+    }</h2><span class="count">${
       capture?.offers.length ?? 0
     } ショップ</span></div><div class="table-scroll"><table><thead><tr><th>除外</th><th>ショップ</th><th class="numeric">価格</th><th>送料・在庫</th></tr></thead><tbody>${
       (capture?.offers ?? []).map((o) =>
@@ -545,6 +627,8 @@ function renderProduct() {
               esc(o.shop_name)
             }</a>`
             : esc(o.shop_name)
+        }${alternative(o)}${
+          o.product_fetched_at ? `<div class="price-small">${esc(dateLabel(o.product_fetched_at))}</div>` : ""
         }</td><td class="numeric">${yen(o.price)}</td><td><small>${esc(o.shipping_text)} ${
           esc(o.stock_text)
         }</small></td></tr>`
@@ -560,7 +644,7 @@ function renderProduct() {
           }</td><td class="numeric">${yen(minimum(c, state.excluded)?.price)}</td><td><span class="tag ${
             item.status === "error" ? "warn" : ""
           }">${
-            {
+            c?.source === "fallback" ? `代替参考価格${item.status === "error" ? "・前回" : ""}` : {
               fresh: "取得",
               carried: "引継ぎ",
               missing: "未取得",
@@ -580,7 +664,7 @@ function renderManage() {
         `<option value="${hour}" ${(state.settings.daily_hour ?? 9) === hour ? "selected" : ""}>毎日 ${
           String(hour).padStart(2, "0")
         }:00</option>`).join("")
-    }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに1商品を順番に取得し、全商品の処理が終わると総額の履歴を保存します。混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
+    }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
     }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
@@ -654,7 +738,9 @@ function showSnapshot(id) {
         const c = cm.get(i.capture_id), p = state.products.find((p) => p.id === i.product_id);
         return `<tr><td><span class="product-name">${esc(c?.name ?? p?.name ?? "商品")}</span><br><small>${
           esc(dateLabel(c?.fetched_at))
-        }${["carried", "error"].includes(i.status) ? " · 前回価格" : ""}</small></td><td class="numeric">${
+        }${c?.source === "fallback" ? " · 代替参考価格" : ""}${
+          ["carried", "error"].includes(i.status) ? " · 前回価格" : ""
+        }</small>${alternative(minimum(c))}</td><td class="numeric">${
           yen(minimum(c)?.price)
         }</td><td class="numeric">${yen(minimum(c, state.excluded)?.price)}</td></tr>`;
       }).join("")
@@ -861,11 +947,18 @@ async function action(name) {
           商品名: r.name,
           URL: r.url,
           初回価格: r.initial,
+          初回価格種別: r.initial_basis.startsWith("fallback:") ? "代替参考価格" : "登録商品の価格",
           比較時点: pointLabel(),
           現在最安価格: r.current,
           指定時点価格: r.past,
           除外後価格: r.filtered,
           価格取得日時: dateLabel(r.fetched_at),
+          価格種別: r.capture?.source === "fallback" ? "代替参考価格" : "登録商品の価格",
+          代替商品名: r.currentOffer?.product_name ?? "",
+          代替商品URL: r.currentOffer?.product_url ?? "",
+          除外後代替商品名: r.filteredOffer?.product_name ?? "",
+          除外後代替商品URL: r.filteredOffer?.product_url ?? "",
+          指定時点価格種別: r.past_is_fallback ? "代替参考価格" : "登録商品の価格",
           前回価格: r.carried ? "はい" : "",
           取得エラー: r.error,
         })),
@@ -889,6 +982,7 @@ async function action(name) {
           除外後小計: r.filtered.subtotal,
           前回比: r.delta,
           前回価格商品数: r.carried,
+          代替参考価格商品数: r.estimates,
           商品構成変更: r.changed ? "はい" : "",
         })),
       ),
@@ -943,6 +1037,11 @@ document.addEventListener("input", (event) => {
 });
 document.addEventListener("change", (event) => {
   const node = event.target;
+  if (node.hasAttribute("data-fallback-mode")) {
+    const input = node.closest("form").elements.fallback_url;
+    input.disabled = node.value !== "custom";
+    input.required = node.value === "custom";
+  }
   if (shareDraft && node.hasAttribute("data-share-product")) {
     node.checked
       ? shareDraft.selected.add(node.dataset.shareProduct)
@@ -991,7 +1090,23 @@ document.addEventListener("submit", async (event) => {
   const form = event.target, data = new FormData(form), button = form.querySelector('button[type="submit"]');
   if (button) button.disabled = true;
   try {
-    if (form.hasAttribute("data-settings")) {
+    if (form.hasAttribute("data-fallback-product")) {
+      const selected = String(data.get("mode"));
+      const mode = selected === "rtx5080" ? "custom" : selected;
+      const url = mode === "custom"
+        ? categoryURL(selected === "rtx5080" ? RTX5080_URL : data.get("fallback_url"))
+        : null;
+      await flushPrefs();
+      if (demo) {
+        const product = state.products.find((p) => p.id === form.dataset.fallbackProduct);
+        product.fallback_mode = mode;
+        product.fallback_url = url;
+      } else {adopt(
+          (await api("fallback-preferences", { product_id: form.dataset.fallbackProduct, mode, url })).state,
+        );}
+      preserveScroll(renderContent);
+      notify("代替条件を保存しました。次回の価格更新から適用します。");
+    } else if (form.hasAttribute("data-settings")) {
       state.settings = {
         ...state.settings,
         interval: Number(data.get("interval")),
@@ -1116,6 +1231,7 @@ setInterval(async () => {
   const revision = viewRevision,
     previousJobID = job?.id,
     previousDone = job?.done,
+    previousFallback = JSON.stringify(job?.fallback),
     previousSnapshot = state.snapshots.at(-1)?.id;
   try {
     const status = await api("status");
@@ -1130,7 +1246,10 @@ setInterval(async () => {
       if (state.snapshots.at(-1)?.id !== previousSnapshot && state.snapshots.at(-1)?.kind === "daily") {
         notify("毎日の自動更新が完了し、価格と総額の履歴を保存しました。");
       }
-    } else if (status.job?.id !== previousJobID || status.job?.done !== previousDone) {
+    } else if (
+      status.job?.id !== previousJobID || status.job?.done !== previousDone ||
+      JSON.stringify(status.job?.fallback) !== previousFallback
+    ) {
       job = status.job;
       preserveScroll(shell);
     }
