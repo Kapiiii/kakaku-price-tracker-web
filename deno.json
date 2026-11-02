@@ -2,7 +2,7 @@
   "tasks": {
     "build": "deno run --allow-read --allow-write --allow-run tools/build.ts",
     "test": "deno test --allow-read --allow-env tests/",
-    "check": "deno check supabase/functions/tracker-api/index.ts"
+    "check": "deno check supabase/functions/tracker-api/index.ts supabase/functions/tracker-daily/index.ts"
   },
   "compilerOptions": { "lib": ["deno.ns", "dom", "dom.iterable", "esnext"], "checkJs": false },
   "nodeModulesDir": "none",

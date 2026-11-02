@@ -1,7 +1,7 @@
 export const nowISO = () => new Date().toISOString();
 export const uid = () => crypto.randomUUID();
 export const clone = (value) => structuredClone(value);
-/** @returns {{schema_version:number,products:any[],captures:any[],snapshots:any[],excluded:string[],settings:{interval:number,max_shops:number}}} */
+/** @returns {{schema_version:number,products:any[],captures:any[],snapshots:any[],excluded:string[],settings:{interval:number,max_shops:number,daily_enabled:boolean,daily_hour:number}}} */
 export function emptyState() {
   return {
     schema_version: 1,
@@ -9,7 +9,7 @@ export function emptyState() {
     captures: [],
     snapshots: [],
     excluded: [],
-    settings: { interval: 3, max_shops: 20 },
+    settings: { interval: 3, max_shops: 20, daily_enabled: true, daily_hour: 9 },
   };
 }
 export function canonicalURL(value) {
@@ -371,7 +371,7 @@ export function importBackup(input) {
       id,
       started_at: new Date(s.started_at ?? s.completed_at).toISOString(),
       completed_at: new Date(s.completed_at).toISOString(),
-      kind: ["add", "update", "remove", "import", "demo"].includes(s.kind) ? s.kind : "import",
+      kind: ["add", "update", "daily", "remove", "import", "demo"].includes(s.kind) ? s.kind : "import",
       items,
     };
   });
@@ -379,6 +379,11 @@ export function importBackup(input) {
   state.settings = {
     interval: Math.max(3, Math.min(30, Number(state.settings?.interval) || 3)),
     max_shops: [10, 15, 20].includes(state.settings?.max_shops) ? state.settings.max_shops : 20,
+    daily_enabled: state.settings?.daily_enabled !== false,
+    daily_hour: Number.isInteger(state.settings?.daily_hour) && state.settings.daily_hour >= 0 &&
+        state.settings.daily_hour <= 23
+      ? state.settings.daily_hour
+      : 9,
   };
   return state;
 }

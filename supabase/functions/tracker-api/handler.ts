@@ -37,6 +37,8 @@ function publicJob(job: any) {
       done: job.payload.index,
       total: job.payload.urls.length,
       created_at: job.created_at,
+      automatic: job.origin === "daily",
+      scheduled_date: job.scheduled_date ?? null,
       errors: job.payload.results.filter((r: any) => r.error).map((r: any) => ({
         url: r.url,
         error: r.error,
@@ -75,7 +77,11 @@ export async function dispatch(
   switch (body.action) {
     case "get": {
       const row = await readState(admin, owner);
-      return { state: row.data, job: publicJob(await runningJob(admin, owner)) };
+      return { state: row.data, version: row.version, job: publicJob(await runningJob(admin, owner)) };
+    }
+    case "status": {
+      const row = await rpc(admin, "tracker_status", { p_owner: owner });
+      return { version: row.version, job: publicJob(row.job) };
     }
     case "preferences": {
       const state = await mutate(admin, owner, (data) => {
@@ -91,7 +97,13 @@ export async function dispatch(
           if (
             !Number.isInteger(interval) || interval < 3 || interval > 30 || ![10, 15, 20].includes(max_shops)
           ) throw new Error("取得設定を確認してください。");
-          data.settings = { interval, max_shops };
+          const daily_enabled = body.settings.daily_enabled ?? data.settings.daily_enabled ?? true;
+          const daily_hour = body.settings.daily_hour ?? data.settings.daily_hour ?? 9;
+          if (
+            typeof daily_enabled !== "boolean" || !Number.isInteger(daily_hour) || daily_hour < 0 ||
+            daily_hour > 23
+          ) throw new Error("自動更新の時刻を確認してください。");
+          data.settings = { interval, max_shops, daily_enabled, daily_hour };
         }
         return data;
       }, true);
@@ -170,7 +182,12 @@ export async function dispatch(
       }
       for (let attempt = 0; attempt < 4; attempt++) {
         const row = await readState(admin, owner),
-          state = applyResults(row.data, payload.results, job.kind, job.created_at);
+          state = applyResults(
+            row.data,
+            payload.results,
+            job.origin === "daily" ? "daily" : job.kind,
+            job.created_at,
+          );
         const completedPayload = {
           ...payload,
           results: payload.results.filter((r: any) => r.error).map((r: any) => ({

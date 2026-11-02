@@ -4,6 +4,12 @@ for (
   const args of [
     ["bundle", "--platform=browser", "--minify", "--output=docs/vendor/supabase.js", "tools/client-entry.js"],
     ["bundle", "--platform=deno", "--output=DEPLOY_FUNCTION.js", "supabase/functions/tracker-api/index.ts"],
+    [
+      "bundle",
+      "--platform=deno",
+      "--output=DEPLOY_DAILY_FUNCTION.js",
+      "supabase/functions/tracker-daily/index.ts",
+    ],
   ]
 ) {
   const result = await new Deno.Command(Deno.execPath(), {

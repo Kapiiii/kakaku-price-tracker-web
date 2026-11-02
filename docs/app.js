@@ -37,6 +37,7 @@ const sb = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
 let state = null, user = null, demo = false, job = null, processing = false, epoch = 0;
 let tab = "compare", pastId = "", selectedProduct = "", shopSearch = "", fixed = false, range = "all";
 let noticeTimer, prefsTimer, prefsPending = false, prefsInFlight = 0, prefsChain = Promise.resolve();
+let viewRevision = 0, polling = false, knownVersion = null;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function notify(message, error = false) {
   const n = $("#notice");
@@ -59,6 +60,7 @@ function download(name, value, type) {
 const kindName = (kind) => ({
   add: "商品追加",
   update: "一括更新",
+  daily: "自動更新",
   remove: "商品削除",
   import: "インポート",
   demo: "デモ更新",
@@ -105,6 +107,7 @@ async function api(action, values = {}) {
 }
 function adopt(next) {
   if (!next) return;
+  viewRevision++;
   if ((prefsPending || prefsInFlight) && state) {
     next.excluded = state.excluded;
     next.settings = state.settings;
@@ -118,6 +121,7 @@ function adopt(next) {
   }
 }
 function queuePrefs() {
+  viewRevision++;
   if (demo) return;
   prefsPending = true;
   clearTimeout(prefsTimer);
@@ -147,7 +151,7 @@ async function flushPrefs() {
 }
 function loginScreen() {
   $("#app").innerHTML =
-    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p><div class="mini-card"><span class="eyebrow">My wish list · サンプル</span><strong>¥69,760 <small class="delta">↘ ¥4,820</small></strong><svg viewBox="0 0 420 70" aria-label="サンプルの総額推移"><path d="M0 6 55 12 110 7 165 26 220 25 275 44 330 40 385 62 420 62" stroke="#17665a" stroke-width="2.5" fill="none"/><path d="M0 6 55 12 110 7 165 26 220 25 275 44 330 40 385 62 420 62 V70 H0" fill="#17665a09"/></svg><div class="mini-caption"><span>2週間前</span><span>今日</span></div></div></div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。自動の定期更新は行いません。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
+    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p><div class="mini-card"><span class="eyebrow">My wish list · サンプル</span><strong>¥69,760 <small class="delta">↘ ¥4,820</small></strong><svg viewBox="0 0 420 70" aria-label="サンプルの総額推移"><path d="M0 6 55 12 110 7 165 26 220 25 275 44 330 40 385 62 420 62" stroke="#17665a" stroke-width="2.5" fill="none"/><path d="M0 6 55 12 110 7 165 26 220 25 275 44 330 40 385 62 420 62 V70 H0" fill="#17665a09"/></svg><div class="mini-caption"><span>2週間前</span><span>今日</span></div></div></div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
 }
 function shell() {
   const tabs = [["compare", "▦", "価格比較"], ["history", "⌁", "総額の推移"], [
@@ -187,7 +191,11 @@ function shell() {
         product: "ショップ別の価格と、これまでの記録。",
         manage: "除外ショップ、取得設定、データのバックアップ。",
       }[tab]
-    }</p></div><div class="row"><button data-action="add" ${
+    }</p><p>${
+      state.settings.daily_enabled !== false
+        ? `自動更新：毎日 ${String(state.settings.daily_hour ?? 9).padStart(2, "0")}:00 開始（日本時間）`
+        : "自動更新：OFF"
+    } · <small>変更は「設定・データ」から</small></p></div><div class="row"><button data-action="add" ${
       job ? "disabled" : ""
     }><span class="button-icon">＋</span>商品を追加</button><button class="primary" data-action="refresh" ${
       job || !activeProducts(state).length ? "disabled" : ""
@@ -223,9 +231,9 @@ function renderJob() {
   if (!node) return;
   node.innerHTML = job
     ? `<div class="banner"><div class="row between"><strong>${
-      kindName(job.kind)
+      job.automatic ? "毎日の自動更新" : kindName(job.kind)
     } ${job.done} / ${job.total} 商品 ${
-      processing ? "を取得中…" : "の取得を保存済み"
+      processing ? "を取得中…" : job.automatic ? "をサーバーで順次取得中" : "の取得を保存済み"
     }</strong><div class="row">${
       !processing ? '<button class="small-button primary" data-action="resume">更新を再開</button>' : ""
     }<button class="small-button" data-action="cancel">中止</button></div></div><progress class="progress" value="${job.done}" max="${job.total}"></progress><small>完了すると価格と総額の履歴をまとめて保存します。画面を閉じた場合は、ここから再開できます。</small>${
@@ -511,7 +519,14 @@ function renderProduct() {
 }
 function renderManage() {
   $("#content").innerHTML =
-    `<div class="details-grid"><section class="panel"><div class="panel-header"><h2>価格の取得設定</h2></div><div class="panel-body"><form data-settings><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
+    `<div class="details-grid"><section class="panel"><div class="panel-header"><h2>価格の取得設定</h2></div><div class="panel-body"><form data-settings><label class="row"><input type="checkbox" name="daily_enabled" ${
+      state.settings.daily_enabled !== false ? "checked" : ""
+    }>毎日1回、自動で価格を更新する</label><label class="field">自動更新の開始時刻（日本時間）<select name="daily_hour">${
+      Array.from({ length: 24 }, (_, hour) =>
+        `<option value="${hour}" ${(state.settings.daily_hour ?? 9) === hour ? "selected" : ""}>毎日 ${
+          String(hour).padStart(2, "0")
+        }:00</option>`).join("")
+    }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに1商品を順番に取得し、全商品の処理が終わると総額の履歴を保存します。混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
     }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
@@ -526,7 +541,7 @@ function renderManage() {
       ).join("") || '<p class="help">登録商品がありません。</p>'
     }</div><button class="danger section-space" type="submit" ${
       job || !activeProducts(state).length ? "disabled" : ""
-    }>選択した商品を削除</button></form></div></section></div><p class="help section-space">このアプリは、手動で更新した価格を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
+    }>選択した商品を削除</button></form></div></section></div><p class="help section-space">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
 }
 function modal(content) {
@@ -834,10 +849,16 @@ document.addEventListener("submit", async (event) => {
   if (button) button.disabled = true;
   try {
     if (form.hasAttribute("data-settings")) {
-      state.settings = { interval: Number(data.get("interval")), max_shops: Number(data.get("max_shops")) };
+      state.settings = {
+        interval: Number(data.get("interval")),
+        max_shops: Number(data.get("max_shops")),
+        daily_enabled: data.get("daily_enabled") === "on",
+        daily_hour: Number(data.get("daily_hour")),
+      };
       queuePrefs();
       await flushPrefs();
       notify("取得設定を保存しました。");
+      shell();
     } else if (form.hasAttribute("data-add")) {
       const urls = String(data.get("urls")).split(/\r?\n/).map((s) => s.trim()).filter(Boolean).map(
         canonicalURL,
@@ -920,6 +941,7 @@ async function authChange(session) {
   try {
     const result = await api("get");
     if (currentEpoch !== epoch) return;
+    knownVersion = result.version;
     adopt(result.state);
     job = result.job;
     shell();
@@ -937,6 +959,40 @@ sb.auth.onAuthStateChange((_event, session) => {
     authChange(session).catch((e) => notify(e.message, true));
   }, 0);
 });
+// 開いている画面にも自動更新の進捗・完了を反映する。入力中の設定画面は再描画しない。
+setInterval(async () => {
+  if (
+    !user || demo || !state || processing || polling || document.hidden || tab === "manage" ||
+    $("#modal").open || prefsPending || prefsInFlight
+  ) return;
+  polling = true;
+  const revision = viewRevision,
+    previousJobID = job?.id,
+    previousDone = job?.done,
+    previousSnapshot = state.snapshots.at(-1)?.id;
+  try {
+    const status = await api("status");
+    if (revision !== viewRevision || processing || job?.id !== previousJobID) return;
+    if (status.version !== knownVersion) {
+      const result = await api("get");
+      if (revision !== viewRevision || processing || job?.id !== previousJobID) return;
+      adopt(result.state);
+      knownVersion = result.version;
+      job = result.job;
+      shell();
+      if (state.snapshots.at(-1)?.id !== previousSnapshot && state.snapshots.at(-1)?.kind === "daily") {
+        notify("毎日の自動更新が完了し、価格と総額の履歴を保存しました。");
+      }
+    } else if (status.job?.id !== previousJobID || status.job?.done !== previousDone) {
+      job = status.job;
+      shell();
+    }
+  } catch {
+    /* 一時的な通信失敗は次の定期確認で再試行する */
+  } finally {
+    polling = false;
+  }
+}, 60000);
 sb.auth.getSession().then(({ data, error }) => {
   if (error) notify(error.message, true);
   if (!data.session && !user) loginScreen();

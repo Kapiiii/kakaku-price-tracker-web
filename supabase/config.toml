@@ -2,3 +2,7 @@ project_id = "nicgbsemqltpxyvyoslk"
 
 [functions.tracker-api]
 verify_jwt = true
+
+# 定期呼出しも標準JWT検証を通し、加えてVaultの専用シークレットを検証する。
+[functions.tracker-daily]
+verify_jwt = true

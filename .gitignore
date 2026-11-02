@@ -6,3 +6,4 @@ node_modules/
 supabase/.temp/
 coverage/
 DEPLOY_FUNCTION.js
+DEPLOY_DAILY_FUNCTION.js
