@@ -153,3 +153,22 @@ Deno.test("fallback failure preserves last prices; access blocks stop without by
   equal(comparison(state)[0].current, 800);
   equal(state.captures.length, 1);
 });
+Deno.test("model-number titles use the product chipset field and ignore unrelated RTX mentions", () => {
+  const inspect = (chip: string, title = "GV-N5080WF3-16GD [PCIExp 16GB]", scoped = true) => {
+    const html = `<title>価格.com - ${title} 価格比較</title><h1>${title}</h1><table class="${
+      scoped ? "p-spec_table s-spec_table" : "recommendations"
+    }"><tbody><tr><th>搭載チップ\n</th><td>NVIDIA<br>${chip}</td></tr></tbody></table>`;
+    try {
+      parseProduct(html, original);
+      throw new Error("expected missing prices");
+    } catch (error) {
+      assert(error instanceof PriceError);
+      return error.metadata.category_url;
+    }
+  };
+  equal(inspect("GeForce RTX 5080"), RTX5080_URL);
+  equal(inspect("GeForce RTX™ 5080"), RTX5080_URL);
+  equal(inspect("GeForce RTX 5070", "RTX 5080と比較した商品"), null);
+  equal(inspect("GeForce RTX 5080", undefined, false), null);
+  equal(inspect("GeForce RTX 5080 Laptop GPU"), null);
+});

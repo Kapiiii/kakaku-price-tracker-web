@@ -82,12 +82,19 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
   if (Array.isArray(image)) image = image[0];
   if (image && typeof image === "object") image = image.url;
   image = image || doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
+  const chipRow = [
+    ...doc.querySelectorAll(".p-spec_table tr,#specBox tr,#specTbl tr,.p-specTable tr,.spec_tbl tr"),
+  ].find((row) =>
+    [...row.children].some((cell) => cell.tagName === "TH" && text(cell).replace(/\s/g, "") === "搭載チップ")
+  );
+  const chip = chipRow
+    ? String([...chipRow.children].find((cell) => cell.tagName === "TD")?.textContent ?? "").trim()
+    : "";
   const metadata = {
     name,
     image_url: safeURL(image) || null,
     category_url: inferredCategory(
-      name + " " + String(selected[0]?.description ?? "") + " " +
-        text(doc.querySelector("#specBox,#specTbl,.p-specTable")),
+      chip || name + " " + String(selected[0]?.description ?? ""),
     ),
   };
   const offers: any[] = [];

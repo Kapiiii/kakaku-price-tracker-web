@@ -31,7 +31,7 @@ export function optionalCategory(value) {
 }
 export function inferredCategory(name) {
   return /\b(?:GeForce\s*)?RTX\s*5080\b(?!\s*(?:Ti|SUPER|Laptop|Mobile)\b)/i.test(
-      String(name).normalize("NFKC"),
+      String(name).replace(/[™®]/g, "").normalize("NFKC"),
     )
     ? RTX5080_URL
     : null;
