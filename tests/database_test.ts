@@ -12,6 +12,12 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     await db.exec(
       await Deno.readTextFile(new URL("../supabase/migrations/202611020001_tracker.sql", import.meta.url)),
     );
+    await db.exec("alter table public.tracker_jobs add column origin text not null default 'manual';");
+    await db.exec(
+      await Deno.readTextFile(
+        new URL("../supabase/migrations/20261102040752_manual_update_daily_limit.sql", import.meta.url),
+      ),
+    );
     const alice = crypto.randomUUID(), bob = crypto.randomUUID();
     await db.query("insert into auth.users values($1),($2)", [alice, bob]);
     const admin = {
@@ -117,7 +123,7 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
       })
     );
     equal((await get(bob)).settings.comparison_point ?? "initial", "initial");
-    await db.query("update public.tracker_jobs set created_at=now()-interval '1 minute' where user_id=$1", [
+    await db.query("update public.tracker_jobs set created_at=now()-interval '1 day' where user_id=$1", [
       alice,
     ]);
     const update = await dispatch(admin, alice, { action: "begin", kind: "update" });
@@ -140,7 +146,7 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
       ) => [r.current, r.filtered, r.carried]),
       [[1000, 1200, true], [1000, 1200, true]],
     );
-    await db.query("update public.tracker_jobs set created_at=now()-interval '1 minute' where user_id=$1", [
+    await db.query("update public.tracker_jobs set created_at=now()-interval '1 day' where user_id=$1", [
       alice,
     ]);
     const pending = await dispatch(admin, alice, { action: "begin", kind: "update" });
@@ -196,7 +202,7 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
       url: category,
     });
     equal((await get(alice)).products[0].fallback_url, category);
-    await db.query("update public.tracker_jobs set created_at=now()-interval '1 minute' where user_id=$1", [
+    await db.query("update public.tracker_jobs set created_at=now()-interval '1 day' where user_id=$1", [
       alice,
     ]);
     const alternativeJob = await dispatch(admin, alice, { action: "begin", kind: "update" });

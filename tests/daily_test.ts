@@ -39,6 +39,11 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
         new URL("../supabase/migrations/20261102001605_daily_gateway_auth.sql", import.meta.url),
       ),
     );
+    await db.exec(
+      await Deno.readTextFile(
+        new URL("../supabase/migrations/20261102040752_manual_update_daily_limit.sql", import.meta.url),
+      ),
+    );
     const setup = (await Deno.readTextFile(new URL("../tools/enable_daily.sql", import.meta.url))).replace(
       "__SUPABASE_LEGACY_ANON_JWT__",
       "eyJ.test.jwt",

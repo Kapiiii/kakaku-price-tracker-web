@@ -89,11 +89,23 @@ export async function dispatch(
   switch (body.action) {
     case "get": {
       const row = await readState(admin, owner);
-      return { state: row.data, version: row.version, job: publicJob(await runningJob(admin, owner)) };
+      return {
+        state: row.data,
+        version: row.version,
+        job: publicJob(await runningJob(admin, owner)),
+        quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+      };
     }
     case "status": {
       const row = await rpc(admin, "tracker_status", { p_owner: owner });
-      return { version: row.version, job: publicJob(row.job) };
+      return {
+        version: row.version,
+        job: publicJob(row.job),
+        quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+      };
+    }
+    case "quota": {
+      return { quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }) };
     }
     case "preferences": {
       const state = await mutate(admin, owner, (data) => {
@@ -162,7 +174,10 @@ export async function dispatch(
       }
       const payload = { urls, index: 0, results: [], settings: state.settings };
       const job = await rpc(admin, "tracker_start_job", { p_owner: owner, p_kind: kind, p_payload: payload });
-      return { job: publicJob(job) };
+      return {
+        job: publicJob(job),
+        quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+      };
     }
     case "step": {
       const jobID = validID(body.job_id),

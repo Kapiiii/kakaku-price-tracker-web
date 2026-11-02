@@ -47,6 +47,7 @@ let tab = "compare",
   range = "all";
 let noticeTimer, prefsTimer, prefsPending = false, prefsInFlight = 0, prefsChain = Promise.resolve();
 let viewRevision = 0, polling = false, knownVersion = null;
+let manualQuota = null, quotaResetTimer, refreshStarting = false, refreshPrompt = null;
 let shareDraft = null;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function notify(message, error = false) {
@@ -87,6 +88,31 @@ function amount(s) {
 }
 function coverage(s) {
   return `${s.known} / ${s.count} 商品の価格を取得`;
+}
+function quotaExhausted() {
+  return manualQuota?.remaining === 0 &&
+    (!manualQuota.resets_at || +new Date(manualQuota.resets_at) > Date.now());
+}
+function renderManualQuota() {
+  const label = $("#manual-quota"), button = $('[data-action="refresh"]');
+  if (label) {
+    label.textContent =
+      manualQuota && (!manualQuota.resets_at || +new Date(manualQuota.resets_at) > Date.now())
+        ? `${
+          demo ? "デモの" : "本日の"
+        }手動更新：残り ${manualQuota.remaining} / 2 回（日本時間0時にリセット）`
+        : "手動の一括更新は1日2回まで（日本時間）";
+  }
+  if (button) button.disabled = !!job || refreshStarting || !activeProducts(state).length || quotaExhausted();
+  const ok = $('[data-action="confirm-refresh"]');
+  if (ok) ok.disabled = refreshStarting || quotaExhausted();
+}
+function setManualQuota(value) {
+  manualQuota = value;
+  clearTimeout(quotaResetTimer);
+  const delay = +new Date(value?.resets_at) - Date.now();
+  if (delay > 0 && delay < 86400001) quotaResetTimer = setTimeout(renderManualQuota, delay + 50);
+  renderManualQuota();
 }
 function alternative(offer) {
   return offer?.product_url
@@ -149,6 +175,7 @@ async function api(action, values = {}) {
       result.error || result.message || `接続エラー (${response.status})。少し待って再度お試しください。`,
     );
   }
+  if (result.quota) setManualQuota(result.quota);
   return result;
 }
 function adopt(next) {
@@ -239,13 +266,14 @@ function shell() {
       state.settings.daily_enabled !== false
         ? `自動更新：毎日 ${String(state.settings.daily_hour ?? 9).padStart(2, "0")}:00 開始（日本時間）`
         : "自動更新：OFF"
-    } · <small>変更は「設定・データ」から</small></p></div><div class="row"><button data-action="share" ${
+    } · <small>変更は「設定・データ」から</small></p></div><div class="heading-actions"><div class="row"><button data-action="share" ${
       activeProducts(state).length ? "" : "disabled"
     }>↗ リストを共有</button><button data-action="add" ${
       job ? "disabled" : ""
     }><span class="button-icon">＋</span>商品を追加</button><button class="primary" data-action="refresh" ${
       job || !activeProducts(state).length ? "disabled" : ""
-    }><span class="button-icon">⟳</span>価格を一括更新</button></div></section><div id="content"></div><footer class="footer"><span>PRICE NOTE · 価格.com非公式ツール</span><span>表示は税込販売価格。送料は総額に含みません。購入前に販売店でご確認ください。</span></footer></main></div>`;
+    }><span class="button-icon">⟳</span>価格を一括更新</button></div><p class="manual-quota" id="manual-quota" aria-live="polite"></p></div></section><div id="content"></div><footer class="footer"><span>PRICE NOTE · 価格.com非公式ツール</span><span>表示は税込販売価格。送料は総額に含みません。購入前に販売店でご確認ください。</span></footer></main></div>`;
+  renderManualQuota();
   renderExclusions();
   renderJob();
   renderContent();
@@ -835,6 +863,8 @@ async function action(name) {
     demo = true;
     job = null;
     processing = false;
+    manualQuota = { used: 0, remaining: 2, limit: 2 };
+    refreshStarting = false;
     adopt(makeDemo());
     shell();
     return;
@@ -882,23 +912,58 @@ async function action(name) {
     return;
   }
   if (name === "refresh") {
-    if (demo) {
-      const results = activeProducts(state).map((p) => {
-        const c = clone(state.captures.findLast((c) => c.product_id === p.id));
-        c.fetched_at = new Date().toISOString();
-        c.offers.forEach((o) => o.price = Math.max(100, o.price - 100));
-        return { url: p.url, data: c };
-      });
-      adopt(applyResults(state, results, "demo"));
+    if (job || refreshStarting || !activeProducts(state).length) return;
+    const promptEpoch = epoch;
+    if (!demo) await api("quota");
+    if (promptEpoch !== epoch) return;
+    refreshPrompt = { epoch };
+    modal(
+      `<h2>価格を一括更新しますか？</h2><p>登録商品を順番に確認するため、更新には数分以上かかる場合があります。代替候補が多い場合や混雑時は、さらに時間がかかります。</p><p><strong>本日の残り：${
+        manualQuota?.remaining ?? 0
+      } / 2 回</strong>（日本時間0時にリセット）</p><p>OKを押して更新が開始すると1回分を消費します。開始後の中止・取得失敗も1回に数えます。同じ更新の再開と、毎日の自動更新はこの回数に含めません。</p>${
+        quotaExhausted()
+          ? '<p class="error-text">本日の上限に達しています。日本時間の翌日0時以降にご利用ください。</p>'
+          : ""
+      }<div class="actions"><button type="button" data-close autofocus>キャンセル</button><button type="button" class="primary" data-action="confirm-refresh" ${
+        quotaExhausted() ? "disabled" : ""
+      }>OK</button></div>`,
+    );
+    return;
+  }
+  if (name === "confirm-refresh") {
+    if (!refreshPrompt || refreshPrompt.epoch !== epoch || refreshStarting || quotaExhausted()) return;
+    const requestEpoch = epoch;
+    refreshStarting = true;
+    $("#modal").close();
+    renderManualQuota();
+    try {
+      if (demo) {
+        const results = activeProducts(state).map((p) => {
+          const c = clone(state.captures.findLast((c) => c.product_id === p.id));
+          c.fetched_at = new Date().toISOString();
+          c.offers.forEach((o) => o.price = Math.max(100, o.price - 100));
+          return { url: p.url, data: c };
+        });
+        adopt(applyResults(state, results, "demo"));
+        manualQuota = { ...manualQuota, used: manualQuota.used + 1, remaining: manualQuota.remaining - 1 };
+        shell();
+        notify("デモの価格を更新しました（各商品 −¥100）。");
+        return;
+      }
+      await flushPrefs();
+      const result = await api("begin", { kind: "update" });
+      job = result.job;
       shell();
-      notify("デモの価格を更新しました（各商品 −¥100）。");
-      return;
+      await runJob();
+    } catch (error) {
+      if (!demo && requestEpoch === epoch) await api("quota").catch(() => {});
+      throw error;
+    } finally {
+      if (requestEpoch === epoch) {
+        refreshStarting = false;
+        renderManualQuota();
+      }
     }
-    await flushPrefs();
-    const result = await api("begin", { kind: "update" });
-    job = result.job;
-    shell();
-    await runJob();
     return;
   }
   if (name === "resume") {
@@ -1020,6 +1085,7 @@ document.addEventListener("click", (event) => {
           (!selectedShareItems().length ||
             (target.dataset.action === "share-copy-link" && !$("#share-link")?.value));
       }
+      if (["refresh", "confirm-refresh"].includes(target.dataset.action)) renderManualQuota();
     });
   }
 });
@@ -1180,12 +1246,16 @@ $("#modal").addEventListener("click", (e) => {
 });
 $("#modal").addEventListener("close", () => {
   shareDraft = null;
+  refreshPrompt = null;
 });
 async function authChange(session) {
   const next = session?.user ?? null;
   if (next?.id === user?.id && !demo) return;
   epoch++;
   state = null;
+  manualQuota = null;
+  refreshStarting = false;
+  clearTimeout(quotaResetTimer);
   job = null;
   processing = false;
   demo = false;
