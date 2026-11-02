@@ -11,10 +11,12 @@ import {
   clone,
   comparableDelta,
   comparison,
+  comparisonPoint,
   csv,
   dateLabel,
   displayAmount,
   importBackup,
+  INITIAL_POINT,
   itemMap,
   makeDemo,
   minimum,
@@ -36,7 +38,12 @@ const sb = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
   auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: true },
 });
 let state = null, user = null, demo = false, job = null, processing = false, epoch = 0;
-let tab = "compare", pastId = "", selectedProduct = "", shopSearch = "", fixed = false, range = "all";
+let tab = "compare",
+  pastId = INITIAL_POINT,
+  selectedProduct = "",
+  shopSearch = "",
+  fixed = false,
+  range = "all";
 let noticeTimer, prefsTimer, prefsPending = false, prefsInFlight = 0, prefsChain = Promise.resolve();
 let viewRevision = 0, polling = false, knownVersion = null;
 let shareDraft = null;
@@ -115,9 +122,7 @@ function adopt(next) {
     next.settings = state.settings;
   }
   state = next;
-  if (!state.snapshots.some((s) => s.id === pastId)) {
-    pastId = state.snapshots.at(-2)?.id ?? state.snapshots.at(-1)?.id ?? "";
-  }
+  pastId = comparisonPoint(state);
   if (!activeProducts(state).some((p) => p.id === selectedProduct)) {
     selectedProduct = activeProducts(state)[0]?.id ?? "";
   }
@@ -253,8 +258,17 @@ function renderContent() {
   if (!state) return;
   ({ compare: renderCompare, history: renderHistory, product: renderProduct, manage: renderManage })[tab]();
 }
+function pointLabel() {
+  return pastId === INITIAL_POINT
+    ? "初回登録時点"
+    : dateLabel(state.snapshots.find((s) => s.id === pastId)?.completed_at);
+}
 function snapshotSelect() {
-  return `<select aria-label="比較する保存時点" data-past><option value="">保存時点を選択</option>${
+  return `<select class="metric-point-select" aria-label="比較する保存時点" title="${
+    esc(pointLabel())
+  }" data-past><option value="${INITIAL_POINT}" ${
+    pastId === INITIAL_POINT ? "selected" : ""
+  }>初回登録時点</option>${
     [...state.snapshots].reverse().map((s) =>
       `<option value="${esc(s.id)}" ${s.id === pastId ? "selected" : ""}>${
         esc(dateLabel(s.completed_at))
@@ -264,26 +278,25 @@ function snapshotSelect() {
 }
 function renderCompare() {
   const rows = comparison(state, pastId),
-    sums = ["initial", "current", "past", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
-    initialDiff = comparableDelta(rows, "current", "initial"),
+    sums = ["past", "current", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
     pastDiff = comparableDelta(rows, "current", "past");
   const latest = state.snapshots.at(-1), carried = rows.filter((r) => r.carried).length;
   $("#content").innerHTML = `<div class="cards">${
-    ["初回登録時の総額", "現在の最安総額", "指定時点の総額", "ショップ除外後の総額"].map((label, i) =>
-      `<article class="metric ${i === 1 ? "current" : ""}"><div class="metric-label">${label}<span>${
-        ["◷", "↘", "▣", "⚑"][i]
-      }</span></div><div class="metric-value">${amount(sums[i])}</div><div class="metric-note">${
+    ["指定時点の総額", "現在の最安総額", "ショップ除外後の総額"].map((label, i) =>
+      `<article class="metric ${
+        i === 0 ? "reference" : i === 1 ? "current" : ""
+      }"><div class="metric-label"><span>${label}</span>${
+        i === 0 ? snapshotSelect() : `<span aria-hidden="true">${["", "↘", "⚑"][i]}</span>`
+      }</div><div class="metric-value">${amount(sums[i])}</div><div class="metric-note">${
         i === 1
-          ? `${delta(initialDiff.amount)} 初回比${
-            initialDiff.count < initialDiff.total ? ` (${initialDiff.count}商品で比較)` : ""
-          }`
-          : i === 2
-          ? `${delta(pastDiff.amount)} 現在 − 指定時点${
+          ? `${delta(pastDiff.amount)} ${pastId === INITIAL_POINT ? "初回登録時点比" : "指定時点比"}${
             pastDiff.count < pastDiff.total ? ` (${pastDiff.count}商品で比較)` : ""
           }`
-          : i === 3
+          : i === 2
           ? `${state.excluded.length} ショップを除外`
-          : "各商品の登録時点の価格を合算"
+          : pastId === INITIAL_POINT
+          ? "各商品の登録時点の価格を合算"
+          : esc(pointLabel())
       }<br>${coverage(sums[i])}</div></article>`
     ).join("")
   }</div>${
@@ -292,9 +305,11 @@ function renderCompare() {
       : ""
   }<section class="panel"><div class="panel-header"><div><h2>登録商品 <span class="count">${rows.length}</span></h2><p>最終保存 ${
     esc(dateLabel(latest?.completed_at))
-  }</p></div><div class="toolbar"><label>比較する時点</label>${snapshotSelect()}<button class="small-button" data-action="compare-csv">CSV保存 ↓</button><button class="small-button mobile-nav" data-action="shops">ショップ除外</button></div></div>${
+  }</p></div><div class="toolbar"><button class="small-button" data-action="compare-csv">CSV保存 ↓</button><button class="small-button mobile-nav" data-action="shops">ショップ除外</button></div></div>${
     rows.length
-      ? `<div class="table-scroll"><table><thead><tr><th>商品</th><th class="numeric">初回価格</th><th class="numeric">現在の最安</th><th class="numeric">指定時点</th><th class="numeric">除外後の最安</th><th></th></tr></thead><tbody>${
+      ? `<div class="table-scroll"><table><thead><tr><th>商品</th><th class="numeric">${
+        pastId === INITIAL_POINT ? "初回登録時点" : "指定時点"
+      }</th><th class="numeric">現在の最安</th><th class="numeric">除外後の最安</th><th></th></tr></thead><tbody>${
         rows.map((r) =>
           `<tr><td><div class="product-cell">${
             r.image_url
@@ -313,18 +328,14 @@ function renderCompare() {
           }${r.capture?.source === "html" ? '<span class="tag">保存HTML</span>' : ""}${
             r.capture?.offers.length ?? 0
           } ショップ</div></div></div></td><td class="numeric"><div class="price-main">${
-            yen(r.initial)
-          }</div><div class="price-small">登録時の価格</div></td><td class="numeric"><div class="price-main">${
+            yen(r.past)
+          }</div><div class="price-small">${
+            r.past === null ? "対象外・未取得" : pastId === INITIAL_POINT ? "登録時の価格" : "保存時点の価格"
+          }</div></td><td class="numeric"><div class="price-main">${
             yen(r.current)
           }</div><div class="price-small" title="${esc(r.currentShop)}">${
             esc(r.currentShop)
-          }</div><div class="price-small">初回比 ${
-            delta(r.current !== null && r.initial !== null ? r.current - r.initial : null)
-          }</div></td><td class="numeric"><div class="price-main">${
-            yen(r.past)
-          }</div><div class="price-small">${
-            r.past === null ? "対象外・未取得" : "保存時点の価格"
-          }</div><div class="price-small">現在 − 指定 ${
+          }</div><div class="price-small">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
             delta(r.current !== null && r.past !== null ? r.current - r.past : null)
           }</div></td><td class="numeric"><div class="price-main price-filtered">${
             yen(r.filtered)
@@ -334,7 +345,7 @@ function renderCompare() {
             esc(r.id)
           }">詳細 →</button></td></tr>`
         ).join("")
-      }</tbody></table></div><div class="table-foot">${rows.length} 商品 · 小計は価格のある商品のみの合算です。差額は両方の時点に価格がある同じ商品で比較します。<br>「初回価格」は初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</div>`
+      }</tbody></table></div><div class="table-foot">${rows.length} 商品 · 小計は価格のある商品のみの合算です。差額は両方の時点に価格がある同じ商品で比較します。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</div>`
       : emptyView()
   }</section>${
     state.snapshots.length > 1
@@ -811,6 +822,7 @@ async function action(name) {
           商品名: r.name,
           URL: r.url,
           初回価格: r.initial,
+          比較時点: pointLabel(),
           現在最安価格: r.current,
           指定時点価格: r.past,
           除外後価格: r.filtered,
@@ -916,8 +928,12 @@ document.addEventListener("change", (event) => {
     if ($("#modal").open && $("#modal-exclusions")) renderExclusions("#modal-exclusions");
   }
   if (node.hasAttribute("data-past")) {
-    pastId = node.value;
+    state.settings.comparison_point = node.value;
+    pastId = comparisonPoint(state);
+    queuePrefs();
     renderContent();
+    $("[data-past]")?.focus();
+    flushPrefs().catch((e) => notify(`比較時点を保存できませんでした。${e.message}`, true));
   }
   if (node.hasAttribute("data-product-select")) {
     selectedProduct = node.value;
@@ -939,6 +955,7 @@ document.addEventListener("submit", async (event) => {
   try {
     if (form.hasAttribute("data-settings")) {
       state.settings = {
+        ...state.settings,
         interval: Number(data.get("interval")),
         max_shops: Number(data.get("max_shops")),
         daily_enabled: data.get("daily_enabled") === "on",

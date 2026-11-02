@@ -8,6 +8,7 @@ import {
   clone,
   comparableDelta,
   comparison,
+  comparisonPoint,
   csv,
   dateLabel,
   emptyState,
@@ -50,6 +51,27 @@ Deno.test("failed update carries last success and preserves immutable historical
   equal(state.snapshots[0], old);
   equal(basketHistory(state).map((r) => r.value), [1000, 1000, 900]);
 });
+Deno.test("initial comparison uses each product's own registration, saved point survives updates and backups", () => {
+  let state = applyResults(emptyState(), [{ url, data: data() }], "add");
+  const first = state.snapshots[0].id;
+  state = applyResults(state, [
+    { url, data: data(800) },
+    { url: "https://kakaku.com/item/K0000000002/", data: data(2000) },
+  ], "add");
+  equal(comparisonPoint(state), "initial");
+  equal(summary(comparison(state).map((r) => r.past)).total, 3000);
+  state.settings.comparison_point = first;
+  equal(comparison(state).map((r) => r.past), [1000, null]);
+  equal(comparableDelta(comparison(state), "current", "past"), { amount: -200, count: 1, total: 2 });
+  state = applyResults(state, [{ url, error: "offline" }]);
+  equal(comparisonPoint(state), first);
+  equal(comparisonPoint(importBackup({ format_version: "cloud-1", data: state })), first);
+  state.settings.comparison_point = "missing-snapshot";
+  equal(comparisonPoint(state), "initial");
+  equal(importBackup({ format_version: "cloud-1", data: state }).settings.comparison_point, "initial");
+  delete state.settings.comparison_point;
+  equal(comparisonPoint(state), "initial");
+});
 Deno.test("failed first registration stays unknown initially and historical missing never uses future price", () => {
   let state = applyResults(emptyState(), [{ url, error: "offline" }], "add");
   const past = state.snapshots[0].id;
@@ -60,6 +82,7 @@ Deno.test("failed first registration stays unknown initially and historical miss
     comparison(state, past)[0].current,
   ], [null, null, 1000]);
   equal(basketHistory(state).map((r) => r.value), [null, 1000]);
+  equal(comparison(state, "initial")[0].past, null);
 });
 Deno.test("all shops excluded is unknown, partial basket subtotal does not become zero", () => {
   let state = makeDemo();

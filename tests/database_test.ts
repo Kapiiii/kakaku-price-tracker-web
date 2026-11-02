@@ -90,6 +90,7 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     equal(done.state.snapshots.length, 1);
     equal(done.state.products.length, 2);
     equal(done.state.settings.interval, 5);
+    equal(done.state.settings.comparison_point, "initial");
     equal((await get(bob)).products.length, 0);
     const repeated = await dispatch(admin, alice, { action: "step", job_id: id }, prices as any);
     equal(repeated.job.status, "completed");
@@ -97,9 +98,25 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     await dispatch(admin, alice, {
       action: "preferences",
       excluded: ["a", "not-a-real-shop"],
-      settings: { interval: 3, max_shops: 20 },
+      settings: { interval: 3, max_shops: 20, comparison_point: done.state.snapshots[0].id },
     });
     equal((await get(alice)).excluded, ["a"]);
+    equal((await get(alice)).settings.comparison_point, done.state.snapshots[0].id);
+    await dispatch(admin, alice, { action: "preferences", settings: { interval: 4, max_shops: 20 } });
+    equal((await get(alice)).settings.comparison_point, done.state.snapshots[0].id);
+    await rejects(() =>
+      dispatch(admin, bob, {
+        action: "preferences",
+        settings: { interval: 3, max_shops: 20, comparison_point: done.state.snapshots[0].id },
+      })
+    );
+    await rejects(() =>
+      dispatch(admin, alice, {
+        action: "preferences",
+        settings: { interval: 3, max_shops: 20, comparison_point: null },
+      })
+    );
+    equal((await get(bob)).settings.comparison_point ?? "initial", "initial");
     await db.query("update public.tracker_jobs set created_at=now()-interval '1 minute' where user_id=$1", [
       alice,
     ]);
@@ -111,6 +128,12 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     const failed = await dispatch(admin, alice, { action: "step", job_id: update.job.id }, fail as any);
     equal(failed.state.snapshots.length, 2);
     equal(failed.state.captures.length, 2);
+    equal((await get(alice)).settings.comparison_point, done.state.snapshots[0].id);
+    await dispatch(admin, alice, {
+      action: "preferences",
+      settings: { interval: 3, max_shops: 20, comparison_point: "initial" },
+    });
+    equal((await get(alice)).settings.comparison_point, "initial");
     equal(
       comparison(failed.state, done.state.snapshots[0].id).map((
         r: any,

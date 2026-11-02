@@ -5,7 +5,9 @@ import {
   archiveProducts,
   canonicalURL,
   clone,
+  comparisonPoint,
   importBackup,
+  INITIAL_POINT,
   shopList,
 } from "../../../docs/core.js";
 import { fetchProduct, parseProduct, PriceError } from "../_shared/kakaku.ts";
@@ -103,7 +105,15 @@ export async function dispatch(
             typeof daily_enabled !== "boolean" || !Number.isInteger(daily_hour) || daily_hour < 0 ||
             daily_hour > 23
           ) throw new Error("自動更新の時刻を確認してください。");
-          data.settings = { interval, max_shops, daily_enabled, daily_hour };
+          const comparison_point = body.settings.comparison_point === undefined
+            ? comparisonPoint(data)
+            : body.settings.comparison_point;
+          if (
+            comparison_point !== INITIAL_POINT &&
+            !(typeof comparison_point === "string" &&
+              data.snapshots.some((s: any) => s.id === comparison_point))
+          ) throw new Error("比較する保存時点を確認してください。");
+          data.settings = { interval, max_shops, daily_enabled, daily_hour, comparison_point };
         }
         return data;
       }, true);

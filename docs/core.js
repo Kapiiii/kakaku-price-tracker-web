@@ -1,7 +1,8 @@
 export const nowISO = () => new Date().toISOString();
 export const uid = () => crypto.randomUUID();
 export const clone = (value) => structuredClone(value);
-/** @returns {{schema_version:number,products:any[],captures:any[],snapshots:any[],excluded:string[],settings:{interval:number,max_shops:number,daily_enabled:boolean,daily_hour:number}}} */
+export const INITIAL_POINT = "initial";
+/** @returns {{schema_version:number,products:any[],captures:any[],snapshots:any[],excluded:string[],settings:{interval:number,max_shops:number,daily_enabled:boolean,daily_hour:number,comparison_point:string}}} */
 export function emptyState() {
   return {
     schema_version: 1,
@@ -9,7 +10,13 @@ export function emptyState() {
     captures: [],
     snapshots: [],
     excluded: [],
-    settings: { interval: 3, max_shops: 20, daily_enabled: true, daily_hour: 9 },
+    settings: {
+      interval: 3,
+      max_shops: 20,
+      daily_enabled: true,
+      daily_hour: 9,
+      comparison_point: INITIAL_POINT,
+    },
   };
 }
 export function canonicalURL(value) {
@@ -86,12 +93,17 @@ export function comparableDelta(rows, current, reference) {
     total: rows.length,
   };
 }
-export function comparison(state, pastId) {
+export function comparisonPoint(state) {
+  const saved = state.settings?.comparison_point;
+  return typeof saved === "string" && state.snapshots.some((s) => s.id === saved) ? saved : INITIAL_POINT;
+}
+export function comparison(state, pastId = comparisonPoint(state)) {
   const captures = capMap(state), current = itemMap(lastSnapshot(state));
   const past = itemMap(state.snapshots.find((s) => String(s.id) === String(pastId)));
   return activeProducts(state).map((p) => {
     const c = latestCapture(state, p.id), initial = captures.get(String(p.initial_capture_id));
-    const old = past.get(String(p.id)), pc = captures.get(String(old?.capture_id));
+    const old = past.get(String(p.id));
+    const pc = pastId === INITIAL_POINT ? initial : captures.get(String(old?.capture_id));
     const first = minimum(initial),
       cheap = minimum(c),
       previous = minimum(pc),
@@ -377,6 +389,7 @@ export function importBackup(input) {
   });
   state.excluded = [...new Set((state.excluded ?? []).map(String))].slice(0, 2000);
   state.settings = {
+    comparison_point: comparisonPoint(state),
     interval: Math.max(3, Math.min(30, Number(state.settings?.interval) || 3)),
     max_shops: [10, 15, 20].includes(state.settings?.max_shops) ? state.settings.max_shops : 20,
     daily_enabled: state.settings?.daily_enabled !== false,
