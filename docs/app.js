@@ -1,5 +1,6 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js";
+import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
 import {
   activeProducts,
   applyResults,
@@ -38,6 +39,7 @@ let state = null, user = null, demo = false, job = null, processing = false, epo
 let tab = "compare", pastId = "", selectedProduct = "", shopSearch = "", fixed = false, range = "all";
 let noticeTimer, prefsTimer, prefsPending = false, prefsInFlight = 0, prefsChain = Promise.resolve();
 let viewRevision = 0, polling = false, knownVersion = null;
+let shareDraft = null;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function notify(message, error = false) {
   const n = $("#notice");
@@ -195,7 +197,9 @@ function shell() {
       state.settings.daily_enabled !== false
         ? `自動更新：毎日 ${String(state.settings.daily_hour ?? 9).padStart(2, "0")}:00 開始（日本時間）`
         : "自動更新：OFF"
-    } · <small>変更は「設定・データ」から</small></p></div><div class="row"><button data-action="add" ${
+    } · <small>変更は「設定・データ」から</small></p></div><div class="row"><button data-action="share" ${
+      activeProducts(state).length ? "" : "disabled"
+    }>↗ リストを共有</button><button data-action="add" ${
       job ? "disabled" : ""
     }><span class="button-icon">＋</span>商品を追加</button><button class="primary" data-action="refresh" ${
       job || !activeProducts(state).length ? "disabled" : ""
@@ -544,10 +548,50 @@ function renderManage() {
     }>選択した商品を削除</button></form></div></section></div><p class="help section-space">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
 }
-function modal(content) {
+function modal(content, className = "") {
   const node = $("#modal");
+  node.className = className;
   node.innerHTML = content;
   if (!node.open) node.showModal();
+}
+function showShare() {
+  const products = activeProducts(state).map((p) => ({ id: String(p.id), url: p.url, name: p.name }));
+  if (!products.length) throw new Error("共有する商品を登録してください。");
+  shareDraft = { products, selected: new Set(products.map((p) => p.id)), includeNames: false };
+  modal(
+    `<h2>商品URLリストを共有</h2><p>共有する商品を選択してください。共有リンクを知っている人は、ログインせずに一覧を開けます。</p><div class="share-dialog-grid"><div><div class="share-selection"><div class="row between"><label class="row"><input type="checkbox" data-share-all checked>すべて選択</label><span id="share-count" class="count"></span></div><div class="share-product-options" role="group" aria-label="共有する商品">${
+      products.map((p) =>
+        `<label class="share-product-option"><input type="checkbox" data-share-product="${
+          esc(p.id)
+        }" checked><span><strong>${esc(p.name)}</strong><small>${esc(p.url)}</small></span></label>`
+      ).join("")
+    }</div></div><label class="row"><input type="checkbox" data-share-names>商品名も含める</label></div><div><label class="field">共有するリスト<textarea id="share-text" readonly rows="4" spellcheck="false"></textarea></label><div class="row"><button type="button" data-action="share-copy-text">リストをコピー</button><button type="button" data-action="share-download">TXTで保存 ↓</button></div><label class="field">共有リンク<input id="share-link" type="text" readonly spellcheck="false"></label><p class="help" id="share-help" aria-live="polite"></p></div></div><p class="help">共有するのは選択した商品URLと、チェックした場合の商品名です。共有時点の内容がリンクに保存されます。</p><div class="actions"><button data-close>閉じる</button><button class="primary" data-action="share-copy-link">共有リンクをコピー</button></div>`,
+    "share-dialog",
+  );
+  updateSharePreview();
+}
+function selectedShareItems() {
+  return shareDraft?.products.filter((p) => shareDraft.selected.has(p.id)) ?? [];
+}
+function updateSharePreview() {
+  if (!shareDraft || !$("#share-text")) return;
+  const products = selectedShareItems(), count = products.length;
+  $("#share-count").textContent = `${count} / ${shareDraft.products.length} 商品`;
+  $("#share-text").value = productListText(products, shareDraft.includeNames);
+  const all = $("[data-share-all]");
+  all.checked = count === shareDraft.products.length;
+  all.indeterminate = count > 0 && count < shareDraft.products.length;
+  for (const name of ["share-copy-text", "share-download"]) $(`[data-action="${name}"]`).disabled = !count;
+  let link = "", error = "";
+  try {
+    link = createShareURL(products, location.href, shareDraft.includeNames);
+  } catch (e) {
+    error = e.message;
+  }
+  $("#share-link").value = link;
+  $("#share-help").textContent = error ||
+    "このリンクを開くと、選択した商品リストをログインなしで閲覧できます。";
+  $(`[data-action="share-copy-link"]`).disabled = !link;
 }
 function showSnapshot(id) {
   const s = state.snapshots.find((s) => s.id === id), cm = capMap(state);
@@ -608,6 +652,32 @@ async function runJob() {
   }
 }
 async function action(name) {
+  if (name === "share") {
+    showShare();
+    return;
+  }
+  if (name === "share-copy-text" || name === "share-copy-link") {
+    if (!shareDraft) throw new Error("共有する商品を選択してください。");
+    const field = $(name === "share-copy-link" ? "#share-link" : "#share-text"), value = field?.value;
+    if (!value) throw new Error("共有する商品を1件以上選択してください。");
+    const copied = await copyText(value, field);
+    const message = copied
+      ? (name === "share-copy-link" ? "共有リンクをコピーしました。" : "商品URLリストをコピーしました。")
+      : "表示欄を選択しました。Ctrl+C、または端末のコピー操作をご利用ください。";
+    if ($("#share-help")) $("#share-help").textContent = message;
+    notify(message);
+    return;
+  }
+  if (name === "share-download") {
+    const items = shareItems(selectedShareItems(), shareDraft?.includeNames);
+    if (!items.length) throw new Error("共有する商品を1件以上選択してください。");
+    download(
+      "price-note-urls.txt",
+      "\ufeff" + productListText(items, shareDraft.includeNames),
+      "text/plain;charset=utf-8",
+    );
+    return;
+  }
   if (name === "login") {
     const settings = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
       headers: { apikey: CONFIG.publishableKey },
@@ -800,7 +870,11 @@ document.addEventListener("click", (event) => {
   if (target.dataset.action) {
     target.disabled = true;
     action(target.dataset.action).catch((e) => notify(e.message, true)).finally(() => {
-      if (target.isConnected) target.disabled = false;
+      if (target.isConnected) {
+        target.disabled = target.dataset.action.startsWith("share-") &&
+          (!selectedShareItems().length ||
+            (target.dataset.action === "share-copy-link" && !$("#share-link")?.value));
+      }
     });
   }
 });
@@ -818,6 +892,21 @@ document.addEventListener("input", (event) => {
 });
 document.addEventListener("change", (event) => {
   const node = event.target;
+  if (shareDraft && node.hasAttribute("data-share-product")) {
+    node.checked
+      ? shareDraft.selected.add(node.dataset.shareProduct)
+      : shareDraft.selected.delete(node.dataset.shareProduct);
+    updateSharePreview();
+  }
+  if (shareDraft && node.hasAttribute("data-share-all")) {
+    shareDraft.selected = node.checked ? new Set(shareDraft.products.map((p) => p.id)) : new Set();
+    for (const input of document.querySelectorAll("[data-share-product]")) input.checked = node.checked;
+    updateSharePreview();
+  }
+  if (shareDraft && node.hasAttribute("data-share-names")) {
+    shareDraft.includeNames = node.checked;
+    updateSharePreview();
+  }
   if (node.dataset.shop) {
     const keys = new Set(state.excluded);
     node.checked ? keys.add(node.dataset.shop) : keys.delete(node.dataset.shop);
@@ -918,6 +1007,9 @@ $("#modal").addEventListener("click", (e) => {
       e.target.close();
     }
   }
+});
+$("#modal").addEventListener("close", () => {
+  shareDraft = null;
 });
 async function authChange(session) {
   const next = session?.user ?? null;

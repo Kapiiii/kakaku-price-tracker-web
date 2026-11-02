@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#17665a">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex,nofollow">
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+    <title>共有された商品URLリスト｜PRICE NOTE</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./share-view.js"></script>
+  </head>
+  <body>
+    <main class="share-page">
+      <header
+        class="share-header"><a class="brand" href="./"><span class="brand-mark">P<span>↘</span></span><div>PRICE NOTE<small>買い時を、見つけよう。</small></div></a><a class="share-workspace" href="./">マイリストを開く →</a></header>
+      <section id="shared-content" aria-live="polite">
+        <div class="boot" role="status">共有リストを読み込んでいます…</div>
+      </section>
+      <footer
+        class="footer"><span>PRICE NOTE · 価格.com非公式ツール</span><span>共有時点の商品URLリストです。</span></footer>
+    </main>
+    <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
+    <noscript>このリストを表示するには、ブラウザーのJavaScriptを有効にしてください。</noscript>
+  </body>
+</html>
