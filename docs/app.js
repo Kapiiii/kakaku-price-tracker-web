@@ -229,11 +229,50 @@ function renderExclusions(target = "#exclusions") {
           }><span title="${esc(s.name)}">${esc(s.name)}</span></label>`
         ).join("")
         : '<p class="side-note">取得後にショップが表示されます。</p>'
-    }</div><p class="side-note">チェックしたショップを計算から除外します。切り替えると総額も変わります。</p>${
-      state.excluded.length
-        ? '<button class="ghost small-button" data-action="clear-excluded">除外をすべて解除</button>'
-        : ""
-    }`;
+    }</div><p class="side-note">チェックしたショップを計算から除外します。切り替えると総額も変わります。</p><button class="ghost small-button" data-action="clear-excluded" ${
+      state.excluded.length ? "" : "hidden"
+    }>除外をすべて解除</button>`;
+}
+function preserveScroll(render) {
+  const x = window.scrollX, y = window.scrollY;
+  const selectors = [".sidebar", ".shop-list", ".table-scroll", ".chart-wrap", "#modal"];
+  const offsets = selectors.map((selector) =>
+    [...document.querySelectorAll(selector)].map((node) => ({ top: node.scrollTop, left: node.scrollLeft }))
+  );
+  render();
+  selectors.forEach((selector, i) => {
+    document.querySelectorAll(selector).forEach((node, j) => {
+      const offset = offsets[i][j];
+      if (offset) {
+        node.scrollTop = offset.top;
+        node.scrollLeft = offset.left;
+      }
+    });
+  });
+  window.scrollTo({ left: x, top: y, behavior: "instant" });
+}
+function refreshExcluded() {
+  const focused = document.activeElement, focusedShop = focused?.dataset.shop;
+  preserveScroll(() => {
+    // 一覧と設定フォームを残し、再計算が必要な価格表示だけを更新する。
+    if (tab !== "manage") renderContent();
+    const excluded = new Set(state.excluded);
+    for (const input of document.querySelectorAll("[data-shop]")) {
+      input.checked = excluded.has(input.dataset.shop);
+      input.closest(".shop-offer")?.classList.toggle("excluded", input.checked);
+    }
+    for (const count of document.querySelectorAll(".exclude-title .count")) {
+      count.textContent = String(excluded.size);
+    }
+    for (const button of document.querySelectorAll('[data-action="clear-excluded"]')) {
+      button.hidden = !excluded.size;
+    }
+    if (focusedShop && !focused.isConnected) {
+      [...document.querySelectorAll("#content [data-shop]")].find((input) =>
+        input.dataset.shop === focusedShop
+      )?.focus({ preventScroll: true });
+    }
+  });
 }
 function renderJob() {
   const node = $("#job");
@@ -736,7 +775,7 @@ async function action(name) {
   if (name === "clear-excluded") {
     state.excluded = [];
     queuePrefs();
-    shell();
+    refreshExcluded();
     return;
   }
   if (name === "shops") {
@@ -924,8 +963,7 @@ document.addEventListener("change", (event) => {
     node.checked ? keys.add(node.dataset.shop) : keys.delete(node.dataset.shop);
     state.excluded = [...keys];
     queuePrefs();
-    shell();
-    if ($("#modal").open && $("#modal-exclusions")) renderExclusions("#modal-exclusions");
+    refreshExcluded();
   }
   if (node.hasAttribute("data-past")) {
     state.settings.comparison_point = node.value;
@@ -1088,13 +1126,13 @@ setInterval(async () => {
       adopt(result.state);
       knownVersion = result.version;
       job = result.job;
-      shell();
+      preserveScroll(shell);
       if (state.snapshots.at(-1)?.id !== previousSnapshot && state.snapshots.at(-1)?.kind === "daily") {
         notify("毎日の自動更新が完了し、価格と総額の履歴を保存しました。");
       }
     } else if (status.job?.id !== previousJobID || status.job?.done !== previousDone) {
       job = status.job;
-      shell();
+      preserveScroll(shell);
     }
   } catch {
     /* 一時的な通信失敗は次の定期確認で再試行する */

@@ -288,6 +288,7 @@ hr {
   display: grid;
   grid-template-columns: 244px minmax(0,1fr);
   min-height: 100vh;
+  overflow-anchor: none;
 }
 .sidebar {
   background: #fff;
