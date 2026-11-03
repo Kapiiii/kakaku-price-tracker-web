@@ -1,5 +1,5 @@
 import { createClient } from "./vendor/supabase.js";
-import { CONFIG } from "./config.js?v=accounts";
+import { CONFIG } from "./config.js?v=github-only";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
 import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=broader-fallback";
 import {
@@ -346,57 +346,9 @@ function showFeature(choice) {
   const progress = $(".feature-progress span");
   progress?.replaceWith(progress.cloneNode());
 }
-async function authProviders() {
-  const response = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
-    headers: { apikey: CONFIG.publishableKey },
-  });
-  if (!response.ok) throw new Error("ログイン方法を読み込めませんでした。");
-  return (await response.json()).external ?? {};
-}
-function showEmailForm(mode) {
-  const title = {
-    signin: "PRICE NOTEアカウントでログイン",
-    signup: "PRICE NOTEアカウントを作成",
-    forgot: "パスワードを再設定",
-    recovery: "新しいパスワードを設定",
-  }[mode];
-  modal(`<h2>${title}</h2><form data-email-auth="${mode}">
-    ${
-    mode === "recovery"
-      ? ""
-      : '<label class="field">メールアドレス<input name="email" type="email" autocomplete="email" required></label>'
-  }
-    ${
-    mode === "forgot"
-      ? ""
-      : `<label class="field">パスワード<input name="password" type="password" autocomplete="${
-        mode === "signin" ? "current-password" : "new-password"
-      }" ${mode === "signin" ? "" : 'minlength="8"'} required></label>`
-  }
-    ${
-    mode === "signin"
-      ? '<div class="row"><button type="button" class="ghost" data-action="email-signup">アカウントを作成</button><button type="button" class="ghost" data-action="email-forgot">パスワードを忘れた場合</button></div>'
-      : ""
-  }
-    ${
-    mode === "signup"
-      ? '<p class="help">8文字以上のパスワードを入力してください。確認メールのリンクを、このブラウザーで開くと登録が完了します。</p>'
-      : ""
-  }
-    ${mode === "forgot" ? '<p class="help">再設定メールのリンクを、このブラウザーで開いてください。</p>' : ""}
-    <p class="help" role="status" data-auth-message></p><div class="actions"><button type="button" data-close>閉じる</button><button type="submit" class="primary">${
-    mode === "signin" ? "ログイン" : mode === "recovery" ? "保存" : "メールを送信"
-  }</button></div></form>`);
-}
 function loginScreen() {
   $("#app").innerHTML =
-    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="login-google" hidden>Googleでログイン</button><button data-action="email-signin" hidden>メールアドレスでログイン・新規登録</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
-  const login = $(".login");
-  authProviders().then((providers) => {
-    login.querySelector('[data-action="login-google"]').hidden = !providers.google;
-    login.querySelector('[data-action="email-signin"]').hidden = !CONFIG.emailAccountsEnabled ||
-      !providers.email;
-  }).catch(() => {});
+    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
   $(".feature-carousel").addEventListener("animationend", (event) => {
     if (event.animationName === "feature-countdown") showFeature("next");
   });
@@ -1076,10 +1028,6 @@ async function runJob() {
   }
 }
 async function action(name) {
-  if (["email-signin", "email-signup", "email-forgot"].includes(name) && CONFIG.emailAccountsEnabled) {
-    showEmailForm(name.slice("email-".length));
-    return;
-  }
   if (name === "schedule-account-deletion") {
     modal(
       '<h2>アカウントの削除を予約しますか？</h2><p>30日後にPRICE NOTEのアカウントと、登録商品・価格履歴・設定を削除します。GitHubなど、ログインに使った外部サービスのアカウントには影響しません。</p><form data-account-deletion><label class="row"><input type="checkbox" name="confirm" required>30日後に削除されることを確認しました</label><div class="actions"><button type="button" data-close autofocus>キャンセル</button><button class="danger" type="submit">削除を予約する</button></div></form>',
@@ -1155,15 +1103,15 @@ async function action(name) {
     );
     return;
   }
-  if (name === "login" || name === "login-google") {
-    const provider = name === "login-google" ? "google" : "github";
-    if (!(await authProviders())[provider]) {
-      throw new Error(
-        "このログイン方法はまだ利用できません。デモは今すぐ確認できます。",
-      );
+  if (name === "login") {
+    const response = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
+      headers: { apikey: CONFIG.publishableKey },
+    });
+    if (!response.ok || !(await response.json()).external?.github) {
+      throw new Error("GitHubログインを利用できません。少し待ってお試しください。");
     }
     const { error } = await sb.auth.signInWithOAuth({
-      provider,
+      provider: "github",
       options: { redirectTo: CONFIG.siteUrl },
     });
     if (error) throw error;
@@ -1508,31 +1456,6 @@ document.addEventListener("submit", async (event) => {
       const panel = $("#account-deletion");
       if (panel) showDeletionStatus(panel, status);
       notify("アカウントの削除を予約しました。");
-    } else if (form.hasAttribute("data-email-auth") && CONFIG.emailAccountsEnabled) {
-      const mode = form.dataset.emailAuth, email = String(data.get("email") ?? "").trim();
-      const password = String(data.get("password") ?? "");
-      const message = form.querySelector("[data-auth-message]");
-      const { error } = mode === "signin"
-        ? await sb.auth.signInWithPassword({ email, password })
-        : mode === "signup"
-        ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: CONFIG.siteUrl } })
-        : mode === "forgot"
-        ? await sb.auth.resetPasswordForEmail(email, { redirectTo: CONFIG.siteUrl })
-        : await sb.auth.updateUser({ password });
-      if (error) {
-        message.textContent = mode === "signin"
-          ? "ログインできませんでした。入力内容と確認メールをご確認ください。"
-          : "操作を完了できませんでした。入力内容を確認し、時間をおいてお試しください。";
-        return;
-      }
-      if (mode === "signin" || mode === "recovery") {
-        if (form.isConnected) $("#modal").close();
-        if (mode === "recovery") notify("パスワードを更新しました。");
-      } else {
-        message.textContent = mode === "signup"
-          ? "登録できるアドレスには、確認メールが届きます。"
-          : "登録済みのアドレスには、再設定メールが届きます。";
-      }
     } else if (form.hasAttribute("data-group-edit")) {
       const operation = form.dataset.groupEdit;
       const values = {
@@ -1691,16 +1614,9 @@ async function authChange(session) {
     }
   }
 }
-sb.auth.onAuthStateChange((event, session) => {
-  setTimeout(async () => {
-    try {
-      await authChange(session);
-      if (event === "PASSWORD_RECOVERY" && CONFIG.emailAccountsEnabled && user?.id === session?.user.id) {
-        showEmailForm("recovery");
-      }
-    } catch (e) {
-      notify(e.message, true);
-    }
+sb.auth.onAuthStateChange((_event, session) => {
+  setTimeout(() => {
+    authChange(session).catch((e) => notify(e.message, true));
   }, 0);
 });
 // 開いている画面にも自動更新の進捗・完了を反映する。入力中の設定画面は再描画しない。
