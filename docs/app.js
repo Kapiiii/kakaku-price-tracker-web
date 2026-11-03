@@ -142,7 +142,7 @@ function fallbackSettings(product) {
     : "自動検索に使える条件はまだありません。次回の商品取得時に判定します。";
   return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
-  }"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
+  }"><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
     [["auto", "自動判定（商品仕様から）"], [
       "custom",
       "絞り込み一覧を指定",
@@ -667,6 +667,13 @@ function renderHistory() {
     ).join("") || '<tr><td colspan="7">まだ価格の記録がありません。</td></tr>'
   }</tbody></table></div><div class="table-foot">過去の除外後総額も、現在チェックしているショップを除外して再計算します。当時未取得の商品には未来の価格を補いません。</div></section>`;
 }
+function productSelect(products, location, label) {
+  return `<label class="field">${label}<select data-product-select="${location}">${
+    products.map((p) =>
+      `<option value="${esc(p.id)}" ${p.id === selectedProduct ? "selected" : ""}>${esc(p.name)}</option>`
+    ).join("")
+  }</select></label>`;
+}
 function renderProduct() {
   const view = priceView(state);
   const products = visibleProducts(),
@@ -705,13 +712,9 @@ function renderProduct() {
     }];
   });
   $("#content").innerHTML =
-    `<section class="panel"><div class="panel-header"><div><h2>商品を選択</h2></div><select aria-label="履歴を見る商品" data-product-select>${
-      products.map((q) =>
-        `<option value="${esc(q.id)}" ${q.id === p.id ? "selected" : ""}>${esc(q.name)}</option>`
-      ).join("")
-    }</select></div><div class="panel-body"><a class="product-name" href="${
-      esc(p.url)
-    }" target="_blank" rel="noopener noreferrer">${
+    `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body">${
+      productSelect(products, "history", "履歴を見る商品")
+    }<a class="product-name" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${
       esc(p.name)
     } ↗</a><div class="row section-space"><span class="count">${
       esc(productGroups(state).find((g) => g.id === (p.group_id ?? DEFAULT_GROUP))?.name)
@@ -778,9 +781,9 @@ function renderProduct() {
           }[item.status]
         }</span></td></tr>`
       ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
-    }</tbody></table></div></section></div><section class="panel section-space"><div class="panel-body">${
-      fallbackSettings(p)
-    }</div></section>`;
+    }</tbody></table></div></section></div><section class="panel section-space"><div class="panel-header"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3></div><div class="panel-body">${
+      productSelect(products, "fallback", "代替条件を設定する商品")
+    }${fallbackSettings(p)}</div></section>`;
 }
 function renderManage() {
   $("#content").innerHTML =
@@ -1297,8 +1300,14 @@ document.addEventListener("change", (event) => {
     flushPrefs().catch((e) => notify(`比較時点を保存できませんでした。${e.message}`, true));
   }
   if (node.hasAttribute("data-product-select")) {
+    const location = node.dataset.productSelect, top = node.getBoundingClientRect().top;
     selectedProduct = node.value;
-    renderContent();
+    preserveScroll(renderContent);
+    const replacement = $(`[data-product-select="${location}"]`);
+    if (replacement) {
+      window.scrollBy({ top: replacement.getBoundingClientRect().top - top, behavior: "instant" });
+      replacement.focus({ preventScroll: true });
+    }
   }
   if (node.hasAttribute("data-scope")) {
     fixed = node.value === "fixed";
