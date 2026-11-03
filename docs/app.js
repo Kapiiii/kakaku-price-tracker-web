@@ -30,7 +30,7 @@ import {
   shopList,
   summary,
   yen,
-} from "./core.js?v=bulk-fallback";
+} from "./core.js?v=bulk-group-move";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -1072,19 +1072,31 @@ async function runJob() {
     }
   }
 }
+function productCheckboxes() {
+  return `<fieldset class="share-selection"><legend>対象商品</legend><div class="share-product-options">${
+    visibleProducts().map((p) =>
+      `<label class="share-product-option"><input name="product" type="checkbox" value="${esc(p.id)}" ${
+        p.id === selectedProduct ? "checked" : ""
+      }><span>${esc(p.name)}</span></label>`
+    ).join("")
+  }</div></fieldset>`;
+}
 async function action(name) {
+  if (name === "group-move") {
+    if (job) return;
+    modal(
+      `<h2>商品を別のグループへ移動</h2><p>表示中のグループから移動する商品を選んでください。価格履歴も引き継ぎます。</p>
+      <form data-group-edit="move">${productCheckboxes()}<label class="field">移動先のグループ<select name="group_id" required><option value="" selected disabled>移動先を選択</option>${
+        groupOptions("")
+      }</select></label><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">選んだ商品を移動</button></div></form>`,
+    );
+    return;
+  }
   if (name === "bulk-fallback") {
     if (job) return;
-    const products = visibleProducts();
     modal(
       `<h2>複数商品の代替条件を設定</h2><p>表示中のグループから対象商品を選ぶと、選んだすべての商品に同じ設定が適用されます。</p>
-      <form data-fallback-bulk><fieldset class="share-selection"><legend>対象商品</legend><div class="share-product-options">${
-        products.map((p) =>
-          `<label class="share-product-option"><input name="product" type="checkbox" value="${esc(p.id)}" ${
-            p.id === selectedProduct ? "checked" : ""
-          }><span>${esc(p.name)}</span></label>`
-        ).join("")
-      }</div></fieldset>
+      <form data-fallback-bulk>${productCheckboxes()}
       ${
         fallbackFields("off")
       }<div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">選んだ商品に保存</button></div></form>`,
@@ -1117,26 +1129,15 @@ async function action(name) {
     );
     return;
   }
-  if (name === "group-create" || name === "group-rename" || name === "group-move") {
+  if (name === "group-create" || name === "group-rename") {
     const operation = name.slice("group-".length), group = productGroups(state).find((g) => g.id === groupID);
-    const product = visibleProducts().find((p) => p.id === selectedProduct);
-    const heading = operation === "create"
-      ? "グループを作成"
-      : operation === "rename"
-      ? "グループ名を変更"
-      : "商品を別のグループへ移動";
+    const heading = operation === "create" ? "グループを作成" : "グループ名を変更";
     modal(
       `<h2>${heading}</h2><form data-group-edit="${operation}" data-group-id="${
         esc(group?.id)
-      }" data-product-id="${esc(product?.id)}">${
-        operation === "move"
-          ? `<p>${esc(product?.name)}</p>${
-            groupField(product?.group_id ?? DEFAULT_GROUP)
-          }<p class="help">移動先で、この商品の過去の価格も確認できます。</p>`
-          : `<label class="field">グループ名<input name="name" type="text" maxlength="60" value="${
-            operation === "rename" ? esc(group?.name) : ""
-          }" required autofocus></label>`
-      }<div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">保存</button></div></form>`,
+      }"><label class="field">グループ名<input name="name" type="text" maxlength="60" value="${
+        operation === "rename" ? esc(group?.name) : ""
+      }" required autofocus></label><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">保存</button></div></form>`,
     );
     return;
   }
@@ -1520,17 +1521,19 @@ async function saveForm(form) {
       if (panel) showDeletionStatus(panel, status);
       notify("アカウントの削除を予約しました。");
     } else if (form.hasAttribute("data-group-edit")) {
-      const operation = form.dataset.groupEdit;
+      const operation = form.dataset.groupEdit, product_ids = data.getAll("product");
+      if (operation === "move" && !product_ids.length) throw new Error("移動する商品を選択してください。");
       const values = {
         operation,
         group_id: operation === "move" ? data.get("group_id") : form.dataset.groupId,
-        product_id: form.dataset.productId,
+        product_ids,
         name: data.get("name"),
       };
       await flushPrefs();
       const next = demo ? clone(state) : null;
       const result = demo ? { state: next, group_id: editGroups(next, values) } : await api("groups", values);
       selectGroup(result.group_id);
+      if (operation === "move" && !product_ids.includes(selectedProduct)) selectedProduct = product_ids[0];
       adopt(result.state);
       $("#modal").close();
       shell();
@@ -1538,7 +1541,7 @@ async function saveForm(form) {
         operation === "delete"
           ? "グループを削除しました。商品は「未分類」で確認できます。"
           : operation === "move"
-          ? "商品を移動しました。"
+          ? `${product_ids.length}商品を移動しました。`
           : "グループを保存しました。",
       );
     } else if (form.hasAttribute("data-fallback-product") || form.hasAttribute("data-fallback-bulk")) {

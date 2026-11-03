@@ -43,6 +43,18 @@ Deno.test("groups scope totals and history, and product moves preserve the origi
   equal(basketHistory(groupView(state, group_id)).map((r) => r.value), [1000, 3000]);
   equal(comparison(groupView(state, "ungrouped")), []);
 });
+Deno.test("bulk group moves validate all selected products before changing membership", () => {
+  const state = makeDemo();
+  const group_id = editGroups(state, { operation: "create", name: "まとめ買い" });
+  const product_ids = state.products.slice(0, 2).map((product) => product.id);
+  const before = clone(state);
+  throws(() => editGroups(state, { operation: "move", group_id, product_ids: [...product_ids, "missing"] }));
+  equal(state, before);
+  editGroups(state, { operation: "move", group_id, product_ids });
+  equal(groupView(state, group_id).products.map((p) => p.id), product_ids);
+  equal(state.captures, before.captures);
+  equal(state.snapshots, before.snapshots);
+});
 Deno.test("group deletion returns active and archived products to ungrouped with their history", () => {
   let state = emptyState();
   const group_id = editGroups(state, { operation: "create", name: "家電" });

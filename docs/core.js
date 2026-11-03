@@ -43,12 +43,21 @@ function groupName(value) {
   return value.trim();
 }
 
-export function editGroups(state, { operation, name, group_id, product_id }) {
+export function editGroups(state, { operation, name, group_id, product_id, product_ids }) {
   if (operation === "move") {
-    const product = activeProducts(state).find((p) => p.id === product_id);
-    if (!product) throw new Error("登録商品が見つかりません。");
-    product.group_id = requireGroup(state, group_id);
-    return group_id;
+    const ids = product_ids ?? [product_id];
+    if (
+      !Array.isArray(ids) || !ids.length || ids.length > 100 ||
+      ids.some((id) => typeof id !== "string" || !id)
+    ) {
+      throw new Error("移動する商品を選択してください。");
+    }
+    const destination = requireGroup(state, group_id);
+    const selected = new Set(ids);
+    const products = activeProducts(state).filter((p) => selected.has(p.id));
+    if (products.length !== selected.size) throw new Error("登録商品が見つかりません。");
+    for (const product of products) product.group_id = destination;
+    return destination;
   }
   if (operation === "delete") {
     const groups = state.groups ?? [];
