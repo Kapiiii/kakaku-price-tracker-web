@@ -20,6 +20,71 @@ export function emptyState() {
     },
   };
 }
+export const ALL_GROUPS = "all";
+export const DEFAULT_GROUP = "ungrouped";
+const MAX_GROUPS = 100;
+
+export function productGroups(state) {
+  return [{ id: DEFAULT_GROUP, name: "未分類" }, ...(state.groups ?? [])];
+}
+
+export function requireGroup(state, id = DEFAULT_GROUP) {
+  if (!productGroups(state).some((group) => group.id === id)) {
+    throw new Error("追加先または移動先のグループが見つかりません。");
+  }
+  return id;
+}
+
+function groupName(value) {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > 60) {
+    throw new Error("グループ名は1〜60文字で入力してください。");
+  }
+  return value.trim();
+}
+
+export function editGroups(state, { operation, name, group_id, product_id }) {
+  if (operation === "move") {
+    const product = activeProducts(state).find((p) => p.id === product_id);
+    if (!product) throw new Error("登録商品が見つかりません。");
+    product.group_id = requireGroup(state, group_id);
+    return group_id;
+  }
+  if (operation !== "create" && operation !== "rename") throw new Error("操作を確認してください。");
+  const label = groupName(name);
+  if (
+    label === "すべての商品" ||
+    productGroups(state).some((g) => g.name === label && (operation === "create" || g.id !== group_id))
+  ) {
+    throw new Error("このグループ名はすでに使われています。");
+  }
+  const groups = state.groups ??= [];
+  if (operation === "create") {
+    if (groups.length >= MAX_GROUPS) throw new Error("グループは100件まで作成できます。");
+    const id = uid();
+    groups.push({ id, name: label });
+    return id;
+  }
+  const group = groups.find((g) => g.id === group_id);
+  if (!group) throw new Error("名前を変更するグループが見つかりません。");
+  group.name = label;
+  return group.id;
+}
+
+export function groupView(state, groupID) {
+  if (groupID === ALL_GROUPS) return state;
+  const products = state.products.filter((p) => (p.group_id ?? DEFAULT_GROUP) === groupID);
+  const ids = new Set(products.map((p) => String(p.id)));
+  return {
+    ...state,
+    products,
+    captures: state.captures.filter((c) => ids.has(String(c.product_id))),
+    snapshots: state.snapshots.map((s) => ({
+      ...s,
+      items: s.items.filter((i) => ids.has(String(i.product_id))),
+    })),
+  };
+}
+
 export function canonicalURL(value) {
   let u;
   try {
@@ -172,6 +237,9 @@ export function applyResults(input, results, kind = "update", started = nowISO()
         initial_capture_id: null,
       };
       state.products.push(product);
+    }
+    if ((fresh || product.archived_at) && result.group_id !== undefined) {
+      product.group_id = requireGroup(state, result.group_id);
     }
     product.archived_at = null;
     if (result.metadata) {
@@ -381,6 +449,20 @@ export function importBackup(input) {
     !Array.isArray(state.captures) || state.captures.length > 50000 || !Array.isArray(state.snapshots) ||
     state.snapshots.length > 10000
   ) throw new Error("バックアップの形式または件数を確認してください。");
+  const groups = state.groups ?? [];
+  if (!Array.isArray(groups) || groups.length > MAX_GROUPS) {
+    throw new Error("グループの形式が正しくありません。");
+  }
+  const groupIDs = new Set([DEFAULT_GROUP, ALL_GROUPS]), groupNames = new Set(["未分類", "すべての商品"]);
+  state.groups = groups.map((group) => {
+    const id = group?.id, name = groupName(group?.name);
+    if (typeof id !== "string" || !id || id.length > 100 || groupIDs.has(id) || groupNames.has(name)) {
+      throw new Error("グループの形式が正しくありません。");
+    }
+    groupIDs.add(id);
+    groupNames.add(name);
+    return { id, name };
+  });
   const pids = new Set(), cids = new Set(), sids = new Set(), urls = new Set();
   state.products = state.products.map((p) => {
     const id = String(p.id), url = canonicalURL(p.url);
@@ -392,6 +474,7 @@ export function importBackup(input) {
       id,
       url,
       product_key: url.split("/").at(-2),
+      group_id: requireGroup(state, p.group_id ?? DEFAULT_GROUP),
       name: String(p.name ?? "").slice(0, 500),
       image_url: safeURL(p.image_url) || null,
       created_at: new Date(p.created_at).toISOString(),

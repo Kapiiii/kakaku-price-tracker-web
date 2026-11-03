@@ -1,7 +1,7 @@
 import { PGlite } from "npm:@electric-sql/pglite@0.5.13";
 import { assert, equal, rejects } from "./assert.ts";
 import { dispatch, handler } from "../supabase/functions/tracker-api/handler.ts";
-import { comparison } from "../docs/core.js";
+import { comparison, groupView } from "../docs/core.js";
 
 Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and user isolation", async () => {
   const db = new PGlite();
@@ -79,7 +79,10 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
       image_url: null,
       source: "live",
     });
-    const started = await dispatch(admin, alice, { action: "begin", kind: "add", urls });
+    const created = await dispatch(admin, alice, { action: "groups", operation: "create", name: "自作PC" });
+    const group_id = created.group_id;
+    await rejects(() => dispatch(admin, bob, { action: "begin", kind: "add", urls, group_id }));
+    const started = await dispatch(admin, alice, { action: "begin", kind: "add", urls, group_id });
     const id = started.job.id;
     await rejects(() => dispatch(admin, bob, { action: "step", job_id: id }, prices as any));
     await rejects(() => dispatch(admin, alice, { action: "archive", ids: ["fake"] }));
@@ -95,6 +98,11 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     equal(done.job.status, "completed");
     equal(done.state.snapshots.length, 1);
     equal(done.state.products.length, 2);
+    equal(comparison(groupView(done.state, group_id)).map((r: { current: number }) => r.current), [
+      1000,
+      1000,
+    ]);
+    equal(comparison(groupView(done.state, "ungrouped")).length, 0);
     equal(done.state.settings.interval, 5);
     equal(done.state.settings.comparison_point, "initial");
     equal((await get(bob)).products.length, 0);

@@ -6,8 +6,10 @@ import {
   canonicalURL,
   clone,
   comparisonPoint,
+  editGroups,
   importBackup,
   INITIAL_POINT,
+  requireGroup,
   shopList,
 } from "../../../docs/core.js";
 import { fetchCategory, fetchProduct, parseProduct, PriceError } from "../_shared/kakaku.ts";
@@ -155,6 +157,14 @@ export async function dispatch(
         }),
       };
     }
+    case "groups": {
+      let group_id;
+      const state = await mutate(admin, owner, (state) => {
+        group_id = editGroups(state, body);
+        return state;
+      });
+      return { state, group_id };
+    }
     case "begin": {
       const { data: state } = await readState(admin, owner);
       const kind = body.kind;
@@ -172,7 +182,8 @@ export async function dispatch(
       if (urls.length > 100 || (kind === "add" && existing.size + urls.length > 100)) {
         throw new Error("登録中の商品は100件までにしてください。");
       }
-      const payload = { urls, index: 0, results: [], settings: state.settings };
+      const group_id = kind === "add" ? requireGroup(state, body.group_id) : undefined;
+      const payload = { urls, index: 0, results: [], settings: state.settings, group_id };
       const job = await rpc(admin, "tracker_start_job", { p_owner: owner, p_kind: kind, p_payload: payload });
       return {
         job: publicJob(job),
@@ -270,7 +281,9 @@ export async function dispatch(
         const row = await readState(admin, owner),
           state = applyResults(
             row.data,
-            payload.results,
+            job.kind === "add" && payload.group_id !== undefined
+              ? payload.results.map((result: any) => ({ ...result, group_id: payload.group_id }))
+              : payload.results,
             job.origin === "daily" ? "daily" : job.kind,
             job.created_at,
           );
@@ -315,7 +328,8 @@ export async function dispatch(
             activeProducts(state).length >= 100
           ) throw new Error("登録中の商品は100件までです。");
           const data = parseProduct(body.html, url, state.settings.max_shops, "html");
-          return applyResults(state, [{ url, data }], "import");
+          const group_id = requireGroup(state, body.group_id);
+          return applyResults(state, [{ url, data, group_id }], "import");
         }),
       };
     }

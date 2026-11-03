@@ -388,6 +388,25 @@ hr {
   padding: 0 36px 40px;
   min-width: 0;
 }
+.group-bar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.group-bar label {
+  display: grid;
+  gap: 5px;
+  font-weight: 650;
+  width: min(100%, 250px);
+}
+.group-bar select {
+  width: 100%;
+}
+.group-bar .row {
+  flex-wrap: wrap;
+}
 .topbar {
   height: 77px;
   border-bottom: 1px solid var(--line);

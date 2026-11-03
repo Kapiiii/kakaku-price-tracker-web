@@ -4,6 +4,7 @@ import { copyText, createShareURL, productListText, shareItems } from "./sharing
 import { categoryURL, productFallbackURL, RTX5080_URL } from "./fallback.js";
 import {
   activeProducts,
+  ALL_GROUPS,
   applyResults,
   archiveProducts,
   basketHistory,
@@ -15,12 +16,16 @@ import {
   comparisonPoint,
   csv,
   dateLabel,
+  DEFAULT_GROUP,
   displayAmount,
+  editGroups,
+  groupView,
   importBackup,
   INITIAL_POINT,
   itemMap,
   makeDemo,
   minimum,
+  productGroups,
   safeURL,
   shopList,
   summary,
@@ -39,6 +44,7 @@ const sb = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
   auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: true },
 });
 let state = null, user = null, demo = false, job = null, processing = false, epoch = 0;
+let groupID = ALL_GROUPS;
 let tab = "compare",
   pastId = INITIAL_POINT,
   selectedProduct = "",
@@ -178,6 +184,27 @@ async function api(action, values = {}) {
   if (result.quota) setManualQuota(result.quota);
   return result;
 }
+function visibleProducts() {
+  return activeProducts(state).filter((p) =>
+    groupID === ALL_GROUPS || (p.group_id ?? DEFAULT_GROUP) === groupID
+  );
+}
+function groupOptions(selected, includeAll = false) {
+  const groups = productGroups(state);
+  if (includeAll) groups.unshift({ id: ALL_GROUPS, name: "すべての商品" });
+  return groups.map(({ id, name }) =>
+    `<option value="${esc(id)}" ${selected === id ? "selected" : ""}>${esc(name)}</option>`
+  ).join("");
+}
+function groupField(selected = groupID) {
+  return `<label class="field">商品グループ<select name="group_id">${
+    groupOptions(selected === ALL_GROUPS ? DEFAULT_GROUP : selected)
+  }</select></label>`;
+}
+function ensureSelectedProduct() {
+  const products = visibleProducts();
+  if (!products.some((p) => p.id === selectedProduct)) selectedProduct = products[0]?.id ?? "";
+}
 function adopt(next) {
   if (!next) return;
   viewRevision++;
@@ -187,9 +214,8 @@ function adopt(next) {
   }
   state = next;
   pastId = comparisonPoint(state);
-  if (!activeProducts(state).some((p) => p.id === selectedProduct)) {
-    selectedProduct = activeProducts(state)[0]?.id ?? "";
-  }
+  if (groupID !== ALL_GROUPS && !productGroups(state).some((g) => g.id === groupID)) groupID = ALL_GROUPS;
+  ensureSelectedProduct();
 }
 function queuePrefs() {
   viewRevision++;
@@ -237,9 +263,7 @@ function shell() {
           tab === id ? 'aria-current="page"' : ""
         }><span class="nav-icon">${icon}</span>${label}</button>`
       ).join("")
-    }</nav></div><div class="exclusion-box" id="exclusions"></div><div class="sidebar-bottom"><div class="row between"><span class="side-label">MY LIST</span><span class="count">${
-      activeProducts(state).length
-    } 商品</span></div><p class="side-note">取得に失敗した商品は、条件があれば代替参考価格を探し、取得できなければ前回価格を引き継ぎます。</p></div></aside><main class="workspace">${
+    }</nav></div><div class="exclusion-box" id="exclusions"></div><div class="sidebar-bottom"><div class="row between"><span class="side-label">MY LIST</span><span class="count">${visibleProducts().length} 商品</span></div><p class="side-note">取得に失敗した商品は、条件があれば代替参考価格を探し、取得できなければ前回価格を引き継ぎます。</p></div></aside><main class="workspace">${
       demo
         ? '<div class="demo-banner">デモモード — 架空の商品・価格です。実際の商品を登録するにはログインしてください。</div>'
         : ""
@@ -253,7 +277,15 @@ function shell() {
       )
     }</span><button class="ghost" data-action="logout">${
       demo ? "ログインへ" : "ログアウト"
-    }</button></div></header><div id="job"></div><section class="page-heading"><div><span class="eyebrow">${
+    }</button></div></header><section class="group-bar" aria-label="商品グループ"><label>表示するグループ<select data-group>${
+      groupOptions(groupID, true)
+    }</select></label><div class="row"><button data-action="group-create" ${
+      job ? "disabled" : ""
+    }>＋ グループを作成</button>${
+      groupID !== ALL_GROUPS && groupID !== DEFAULT_GROUP
+        ? `<button data-action="group-rename" ${job ? "disabled" : ""}>名前を変更</button>`
+        : ""
+    }</div></section><div id="job"></div><section class="page-heading"><div><span class="eyebrow">${
       tab === "history" ? "Basket timeline" : "My price journal"
     }</span><h1>${tabs.find((t) => t[0] === tab)[2]}</h1><p>${
       {
@@ -267,7 +299,7 @@ function shell() {
         ? `自動更新：毎日 ${String(state.settings.daily_hour ?? 9).padStart(2, "0")}:00 開始（日本時間）`
         : "自動更新：OFF"
     } · <small>変更は「設定・データ」から</small></p></div><div class="heading-actions"><div class="row"><button data-action="share" ${
-      activeProducts(state).length ? "" : "disabled"
+      visibleProducts().length ? "" : "disabled"
     }>↗ リストを共有</button><button data-action="add" ${
       job ? "disabled" : ""
     }><span class="button-icon">＋</span>商品を追加</button><button class="primary" data-action="refresh" ${
@@ -383,7 +415,8 @@ function snapshotSelect() {
   }</select>`;
 }
 function renderCompare() {
-  const rows = comparison(state, pastId),
+  const view = groupView(state, groupID);
+  const rows = comparison(view, pastId),
     sums = ["past", "current", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
     pastDiff = comparableDelta(rows, "current", "past");
   const latest = state.snapshots.at(-1), carried = rows.filter((r) => r.carried).length;
@@ -481,7 +514,7 @@ function renderCompare() {
   }</section>${
     state.snapshots.length > 1
       ? `<section class="panel"><div class="panel-header"><div><h2>総額の動き</h2><p>現在の登録商品で比較 · 除外設定は過去分にも適用</p></div><button class="ghost small-button" data-tab="history">履歴をすべて見る →</button></div>${
-        chart(basketHistory(state, true).slice(-30))
+        chart(basketHistory(view, true).slice(-30))
       }<div class="legend"><span><i></i>最安価格の合計</span><span><i class="gold"></i>ショップ除外後</span></div></section>`
       : ""
   }`;
@@ -491,7 +524,9 @@ function emptyView() {
 }
 function historyRows() {
   const cutoff = range === "all" ? 0 : Date.now() - Number(range) * 86400000;
-  return basketHistory(state, fixed).filter((r) => +new Date(r.date) >= cutoff);
+  return basketHistory(groupView(state, groupID), fixed).filter((r) =>
+    +new Date(r.date) >= cutoff && (groupID === ALL_GROUPS || fixed || r.raw.count > 0)
+  );
 }
 function chart(records) {
   const rows = records.filter((r) => r.value !== null || r.filteredValue !== null);
@@ -599,7 +634,7 @@ function renderHistory() {
   }</tbody></table></div><div class="table-foot">過去の除外後総額も、現在チェックしているショップを除外して再計算します。当時未取得の商品には未来の価格を補いません。</div></section>`;
 }
 function renderProduct() {
-  const products = activeProducts(state),
+  const products = visibleProducts(),
     p = products.find((p) => p.id === selectedProduct),
     cm = capMap(state),
     row = comparison(state, pastId).find((r) => r.id === selectedProduct);
@@ -615,7 +650,13 @@ function renderProduct() {
       ).join("")
     }</select></div><div class="panel-body"><a class="product-name" href="${
       esc(p.url)
-    }" target="_blank" rel="noopener noreferrer">${esc(p.name)} ↗</a><p class="help">価格を取得した日時：${
+    }" target="_blank" rel="noopener noreferrer">${
+      esc(p.name)
+    } ↗</a><div class="row section-space"><span class="count">${
+      esc(productGroups(state).find((g) => g.id === (p.group_id ?? DEFAULT_GROUP))?.name)
+    }</span><button class="small-button" data-action="group-move" ${
+      job ? "disabled" : ""
+    }>グループを移動</button></div><p class="help">価格を取得した日時：${
       esc(dateLabel(capture?.fetched_at))
     } / 初回登録：${esc(dateLabel(p.created_at))}</p>${
       row?.error
@@ -700,13 +741,13 @@ function renderManage() {
     }>JSONから復元</button></div><hr><h3>保存した商品HTMLから登録・更新</h3><p class="help">自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
       job ? "disabled" : ""
     }>保存HTMLを読み込む</button></div></section><section class="panel"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body" id="manage-exclusions"></div></section><section class="panel"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help">削除した商品は現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
-      activeProducts(state).map((p) =>
+      visibleProducts().map((p) =>
         `<label class="row"><input name="product" type="checkbox" value="${esc(p.id)}"><span>${
           esc(p.name)
         }</span></label>`
       ).join("") || '<p class="help">登録商品がありません。</p>'
     }</div><button class="danger section-space" type="submit" ${
-      job || !activeProducts(state).length ? "disabled" : ""
+      job || !visibleProducts().length ? "disabled" : ""
     }>選択した商品を削除</button></form></div></section></div><p class="help section-space">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
 }
@@ -717,7 +758,7 @@ function modal(content, className = "") {
   if (!node.open) node.showModal();
 }
 function showShare() {
-  const products = activeProducts(state).map((p) => ({ id: String(p.id), url: p.url, name: p.name }));
+  const products = visibleProducts().map((p) => ({ id: String(p.id), url: p.url, name: p.name }));
   if (!products.length) throw new Error("共有する商品を登録してください。");
   shareDraft = { products, selected: new Set(products.map((p) => p.id)), includeNames: false };
   modal(
@@ -756,14 +797,15 @@ function updateSharePreview() {
   $(`[data-action="share-copy-link"]`).disabled = !link;
 }
 function showSnapshot(id) {
-  const s = state.snapshots.find((s) => s.id === id), cm = capMap(state);
+  const view = groupView(state, groupID);
+  const s = view.snapshots.find((s) => s.id === id), cm = capMap(view);
   if (!s) return;
   modal(
     `<h2>保存時点の内訳</h2><p>${esc(dateLabel(s.completed_at))} · ${
       kindName(s.kind)
     }</p><div class="table-scroll section-space"><table><thead><tr><th>当時の商品</th><th class="numeric">最安価格</th><th class="numeric">除外後</th></tr></thead><tbody>${
       s.items.map((i) => {
-        const c = cm.get(i.capture_id), p = state.products.find((p) => p.id === i.product_id);
+        const c = cm.get(i.capture_id), p = view.products.find((p) => p.id === i.product_id);
         return `<tr><td><span class="product-name">${esc(c?.name ?? p?.name ?? "商品")}</span><br><small>${
           esc(dateLabel(c?.fetched_at))
         }${c?.source === "fallback" ? " · 代替参考価格" : ""}${
@@ -816,6 +858,29 @@ async function runJob() {
   }
 }
 async function action(name) {
+  if (name === "group-create" || name === "group-rename" || name === "group-move") {
+    const operation = name.slice("group-".length), group = productGroups(state).find((g) => g.id === groupID);
+    const product = visibleProducts().find((p) => p.id === selectedProduct);
+    const heading = operation === "create"
+      ? "グループを作成"
+      : operation === "rename"
+      ? "グループ名を変更"
+      : "商品を別のグループへ移動";
+    modal(
+      `<h2>${heading}</h2><form data-group-edit="${operation}" data-group-id="${
+        esc(group?.id)
+      }" data-product-id="${esc(product?.id)}">${
+        operation === "move"
+          ? `<p>${esc(product?.name)}</p>${
+            groupField(product?.group_id ?? DEFAULT_GROUP)
+          }<p class="help">移動先で、この商品の過去の価格も確認できます。</p>`
+          : `<label class="field">グループ名<input name="name" type="text" maxlength="60" value="${
+            operation === "rename" ? esc(group?.name) : ""
+          }" required autofocus></label>`
+      }<div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">保存</button></div></form>`,
+    );
+    return;
+  }
   if (name === "share") {
     showShare();
     return;
@@ -865,6 +930,7 @@ async function action(name) {
     processing = false;
     manualQuota = { used: 0, remaining: 2, limit: 2 };
     refreshStarting = false;
+    groupID = ALL_GROUPS;
     adopt(makeDemo());
     shell();
     return;
@@ -907,7 +973,7 @@ async function action(name) {
       return;
     }
     modal(
-      '<h2>商品URLを追加</h2><p>価格.comの商品個別ページのURLを、1行に1件入力してください。</p><form data-add><label class="field">商品ページのURL<textarea name="urls" placeholder="https://kakaku.com/item/K0000000000/" required></textarea></label><p class="help">商品名とショップ別の価格を順番に取得します。取得できなかった商品もリストに追加され、あとから再取得できます。</p><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">登録して取得</button></div></form>',
+      `<h2>商品URLを追加</h2><p>価格.comの商品個別ページのURLを、1行に1件入力してください。</p><form data-add>${groupField()}<label class="field">商品ページのURL<textarea name="urls" placeholder="https://kakaku.com/item/K0000000000/" required></textarea></label><p class="help">商品名とショップ別の価格を順番に取得します。取得できなかった商品もリストに追加され、あとから再取得できます。</p><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">登録して取得</button></div></form>`,
     );
     return;
   }
@@ -918,7 +984,7 @@ async function action(name) {
     if (promptEpoch !== epoch) return;
     refreshPrompt = { epoch };
     modal(
-      `<h2>価格を一括更新しますか？</h2><p>登録商品を順番に確認するため、更新には数分以上かかる場合があります。代替候補が多い場合や混雑時は、さらに時間がかかります。</p><p><strong>本日の残り：${
+      `<h2>価格を一括更新しますか？</h2><p>全グループの登録商品を順番に確認するため、更新には数分以上かかる場合があります。代替候補が多い場合や混雑時は、さらに時間がかかります。</p><p><strong>本日の残り：${
         manualQuota?.remaining ?? 0
       } / 2 回</strong>（日本時間0時にリセット）</p><p>OKを押して更新が開始すると1回分を消費します。開始後の中止・取得失敗も1回に数えます。同じ更新の再開と、毎日の自動更新はこの回数に含めません。</p>${
         quotaExhausted()
@@ -1000,7 +1066,7 @@ async function action(name) {
   if (name === "html") {
     if (demo) throw new Error("HTMLの読み込みはログイン後にご利用ください。");
     modal(
-      '<h2>保存HTMLを読み込む</h2><p>価格.comの商品ページをブラウザーで開いて「HTMLのみ」で保存し、商品URLとファイルを選択してください。</p><form data-html><label class="field">商品URL<input name="url" type="url" required placeholder="https://kakaku.com/item/K0000000000/"></label><label class="field">保存したHTML（1MB以下）<input name="file" type="file" accept=".html,.htm,text/html" required></label><div class="actions"><button type="button" data-close>キャンセル</button><button type="submit" class="primary">読み込んで保存</button></div></form>',
+      `<h2>保存HTMLを読み込む</h2><p>価格.comの商品ページをブラウザーで開いて「HTMLのみ」で保存し、商品URLとファイルを選択してください。</p><form data-html>${groupField()}<label class="field">商品URL<input name="url" type="url" required placeholder="https://kakaku.com/item/K0000000000/"></label><label class="field">保存したHTML（1MB以下）<input name="file" type="file" accept=".html,.htm,text/html" required></label><div class="actions"><button type="button" data-close>キャンセル</button><button type="submit" class="primary">読み込んで保存</button></div></form>`,
     );
     return;
   }
@@ -1008,7 +1074,7 @@ async function action(name) {
     download(
       "price-comparison.csv",
       csv(
-        comparison(state, pastId).map((r) => ({
+        comparison(groupView(state, groupID), pastId).map((r) => ({
           商品名: r.name,
           URL: r.url,
           初回価格: r.initial,
@@ -1130,6 +1196,13 @@ document.addEventListener("change", (event) => {
     queuePrefs();
     refreshExcluded();
   }
+  if (node.hasAttribute("data-group")) {
+    groupID = node.value;
+    viewRevision++;
+    ensureSelectedProduct();
+    preserveScroll(shell);
+    $("[data-group]")?.focus({ preventScroll: true });
+  }
   if (node.hasAttribute("data-past")) {
     state.settings.comparison_point = node.value;
     pastId = comparisonPoint(state);
@@ -1156,7 +1229,23 @@ document.addEventListener("submit", async (event) => {
   const form = event.target, data = new FormData(form), button = form.querySelector('button[type="submit"]');
   if (button) button.disabled = true;
   try {
-    if (form.hasAttribute("data-fallback-product")) {
+    if (form.hasAttribute("data-group-edit")) {
+      const operation = form.dataset.groupEdit;
+      const values = {
+        operation,
+        group_id: operation === "move" ? data.get("group_id") : form.dataset.groupId,
+        product_id: form.dataset.productId,
+        name: data.get("name"),
+      };
+      await flushPrefs();
+      const next = demo ? clone(state) : null;
+      const result = demo ? { state: next, group_id: editGroups(next, values) } : await api("groups", values);
+      groupID = result.group_id;
+      adopt(result.state);
+      $("#modal").close();
+      shell();
+      notify(operation === "move" ? "商品を移動しました。" : "グループを保存しました。");
+    } else if (form.hasAttribute("data-fallback-product")) {
       const selected = String(data.get("mode"));
       const mode = selected === "rtx5080" ? "custom" : selected;
       const url = mode === "custom"
@@ -1189,7 +1278,10 @@ document.addEventListener("submit", async (event) => {
         canonicalURL,
       );
       await flushPrefs();
-      const result = await api("begin", { kind: "add", urls });
+      const group_id = String(data.get("group_id"));
+      const result = await api("begin", { kind: "add", urls, group_id });
+      groupID = group_id;
+      ensureSelectedProduct();
       job = result.job;
       $("#modal").close();
       shell();
@@ -1225,7 +1317,10 @@ document.addEventListener("submit", async (event) => {
         html = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       }
       await flushPrefs();
-      adopt((await api("html", { url: canonicalURL(data.get("url")), html })).state);
+      adopt(
+        (await api("html", { url: canonicalURL(data.get("url")), html, group_id: data.get("group_id") }))
+          .state,
+      );
       $("#modal").close();
       shell();
       notify("保存HTMLから価格を登録しました。");
@@ -1252,6 +1347,7 @@ async function authChange(session) {
   const next = session?.user ?? null;
   if (next?.id === user?.id && !demo) return;
   epoch++;
+  groupID = ALL_GROUPS;
   state = null;
   manualQuota = null;
   refreshStarting = false;

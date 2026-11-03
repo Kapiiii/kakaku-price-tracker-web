@@ -11,7 +11,9 @@ import {
   comparisonPoint,
   csv,
   dateLabel,
+  editGroups,
   emptyState,
+  groupView,
   importBackup,
   makeDemo,
   summary,
@@ -25,6 +27,21 @@ const data = (price = 1000, at = "2026-10-01T00:00:00Z") => ({
     shop_name: "店舗B",
     price: price + 100,
   }],
+});
+Deno.test("groups scope totals and history, and product moves preserve the original captures", () => {
+  let state = applyResults(emptyState(), [{ url, data: data() }], "add");
+  const group_id = editGroups(state, { operation: "create", name: "自作PC" });
+  const other = "https://kakaku.com/item/K0000000002/";
+  state = applyResults(state, [{ url: other, data: data(2000), group_id }], "add");
+  equal(basketHistory(groupView(state, "ungrouped")).map((r) => r.value), [1000, 1000]);
+  equal(basketHistory(groupView(state, group_id)).map((r) => r.value), [0, 2000]);
+  editGroups(state, { operation: "move", group_id, product_id: state.products[0].id });
+  editGroups(state, { operation: "rename", group_id, name: "新しいPC" });
+  state = importBackup({ format_version: "cloud-1", data: state });
+  equal(state.groups, [{ id: group_id, name: "新しいPC" }]);
+  equal(comparison(groupView(state, group_id)).map((r) => r.current), [1000, 2000]);
+  equal(basketHistory(groupView(state, group_id)).map((r) => r.value), [1000, 3000]);
+  equal(comparison(groupView(state, "ungrouped")), []);
 });
 Deno.test("four basket totals, dynamic exclusions and comparable differences", () => {
   const state = makeDemo();
