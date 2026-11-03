@@ -25,12 +25,13 @@ import {
   makeDemo,
   minimum,
   priceView,
+  productGroupIDs,
   productGroups,
   safeURL,
   shopList,
   summary,
   yen,
-} from "./core.js?v=bulk-group-move";
+} from "./core.js?v=multi-group";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -211,9 +212,7 @@ function selectGroup(id) {
   }
 }
 function visibleProducts() {
-  return activeProducts(state).filter((p) =>
-    groupID === ALL_GROUPS || (p.group_id ?? DEFAULT_GROUP) === groupID
-  );
+  return activeProducts(state).filter((p) => groupID === ALL_GROUPS || productGroupIDs(p).includes(groupID));
 }
 function groupOptions(selected, includeAll = false) {
   const groups = productGroups(state);
@@ -811,7 +810,9 @@ function renderProduct() {
     }<a class="product-name" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${
       esc(p.name)
     } ↗</a><div class="row section-space"><span class="count">${
-      esc(productGroups(state).find((g) => g.id === (p.group_id ?? DEFAULT_GROUP))?.name)
+      esc(
+        productGroups(state).filter((g) => productGroupIDs(p).includes(g.id)).map((g) => g.name).join(" / "),
+      )
     }</span><button class="small-button" data-action="group-move" ${
       job ? "disabled" : ""
     }>グループを移動</button></div><p class="help">価格を取得した日時：${
@@ -912,7 +913,7 @@ function renderManage() {
       job ? "disabled" : ""
     }>JSONから復元</button></div><hr><h3>保存した商品HTMLから登録・更新</h3><p class="help">自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
       job ? "disabled" : ""
-    }>保存HTMLを読み込む</button></div></section><section class="panel"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body" id="manage-exclusions"></div></section><section class="panel"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help">削除した商品は現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
+    }>保存HTMLを読み込む</button></div></section><section class="panel"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body" id="manage-exclusions"></div></section><section class="panel"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help">削除した商品はすべてのグループの現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
       visibleProducts().map((p) =>
         `<label class="row"><input name="product" type="checkbox" value="${esc(p.id)}"><span>${
           esc(p.name)
@@ -1085,7 +1086,11 @@ async function action(name) {
   if (name === "group-move") {
     if (job) return;
     modal(
-      `<h2>商品を別のグループへ移動</h2><p>表示中のグループから移動する商品を選んでください。価格履歴も引き継ぎます。</p>
+      `<h2>商品を別のグループへ移動</h2><p>移動する商品を選んでください。価格履歴も引き継ぎます。${
+        groupID === ALL_GROUPS
+          ? "「すべての商品」から移動すると、選んだ商品の所属先は移動先だけになります。"
+          : "ほかのグループにも所属している商品は、そちらの所属を引き継ぎます。"
+      }</p>
       <form data-group-edit="move">${productCheckboxes()}<label class="field">移動先のグループ<select name="group_id" required><option value="" selected disabled>移動先を選択</option>${
         groupOptions("")
       }</select></label><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">選んだ商品を移動</button></div></form>`,
@@ -1123,7 +1128,7 @@ async function action(name) {
     modal(
       `<h2>グループを削除しますか？</h2><p>「${
         esc(group.name)
-      }」を削除します。グループ内の商品と価格履歴は「未分類」に移ります。</p><form data-group-edit="delete" data-group-id="${
+      }」を削除します。ほかのグループに所属していない商品は「未分類」に移ります。価格履歴は引き継ぎます。</p><form data-group-edit="delete" data-group-id="${
         esc(group.id)
       }"><div class="actions"><button type="button" data-close autofocus>キャンセル</button><button type="submit" class="danger">削除する</button></div></form>`,
     );
@@ -1231,7 +1236,7 @@ async function action(name) {
       return;
     }
     modal(
-      `<h2>商品URLを追加</h2><p>価格.comの商品個別ページのURLを、1行に1件入力してください。</p><form data-add>${groupField()}<label class="field">商品ページのURL<textarea name="urls" placeholder="https://kakaku.com/item/K0000000000/" required></textarea></label><p class="help">商品名とショップ別の価格を順番に取得します。取得できなかった商品もリストに追加され、あとから再取得できます。</p><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">登録して取得</button></div></form>`,
+      `<h2>商品URLを追加</h2><p>価格.comの商品個別ページのURLを、1行に1件入力してください。</p><form data-add>${groupField()}<label class="field">商品ページのURL<textarea name="urls" placeholder="https://kakaku.com/item/K0000000000/" required></textarea></label><p class="help">登録済みの商品は、価格と履歴を共有したまま別のグループにも追加できます。新規商品は順番に価格を取得します。</p><div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">登録して取得</button></div></form>`,
     );
     return;
   }
@@ -1527,6 +1532,7 @@ async function saveForm(form) {
         operation,
         group_id: operation === "move" ? data.get("group_id") : form.dataset.groupId,
         product_ids,
+        source_group_id: groupID,
         name: data.get("name"),
       };
       await flushPrefs();
@@ -1539,7 +1545,7 @@ async function saveForm(form) {
       shell();
       notify(
         operation === "delete"
-          ? "グループを削除しました。商品は「未分類」で確認できます。"
+          ? "グループを削除しました。所属先がなくなった商品は「未分類」に移しました。"
           : operation === "move"
           ? `${product_ids.length}商品を移動しました。`
           : "グループを保存しました。",
@@ -1585,15 +1591,17 @@ async function saveForm(form) {
       const group_id = String(data.get("group_id"));
       const result = await api("begin", { kind: "add", urls, group_id });
       selectGroup(group_id);
-      ensureSelectedProduct();
+      if (result.state) adopt(result.state);
+      else ensureSelectedProduct();
       job = result.job;
       $("#modal").close();
       shell();
-      await runJob();
+      if (job) await runJob();
+      else notify("登録済みの商品を選んだグループに追加しました。");
     } else if (form.hasAttribute("data-archive")) {
       const ids = data.getAll("product");
       if (!ids.length) throw new Error("削除する商品を選択してください。");
-      if (!confirm(`${ids.length}商品を現在のリストから削除します。過去の履歴は保持します。`)) return;
+      if (!confirm(`${ids.length}商品をすべてのグループから削除します。過去の履歴は保持します。`)) return;
       await flushPrefs();
       adopt(demo ? archiveProducts(state, ids) : (await api("archive", { ids })).state);
       shell();

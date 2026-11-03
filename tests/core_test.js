@@ -1,6 +1,7 @@
 import { assert, equal, throws } from "./assert.ts";
 import {
   activeProducts,
+  addProductsToGroup,
   applyResults,
   archiveProducts,
   basketHistory,
@@ -16,6 +17,7 @@ import {
   groupView,
   importBackup,
   makeDemo,
+  productGroupIDs,
   summary,
 } from "../docs/core.js";
 const url = "https://kakaku.com/item/K0000000001/";
@@ -42,6 +44,29 @@ Deno.test("groups scope totals and history, and product moves preserve the origi
   equal(comparison(groupView(state, group_id)).map((r) => r.current), [1000, 2000]);
   equal(basketHistory(groupView(state, group_id)).map((r) => r.value), [1000, 3000]);
   equal(comparison(groupView(state, "ungrouped")), []);
+});
+Deno.test("multi-group products retain a single history and membership survives backup, move, and group deletion", () => {
+  let state = applyResults(emptyState(), [{ url, data: data() }], "add");
+  const first = editGroups(state, { operation: "create", name: "候補A" });
+  const second = editGroups(state, { operation: "create", name: "候補B" });
+  equal(addProductsToGroup(state, [url, url], first), 1);
+  equal(addProductsToGroup(state, [url], first), 0);
+  state = importBackup({ format_version: "cloud-1", data: state });
+  const product = state.products[0];
+  equal(productGroupIDs(product), ["ungrouped", first]);
+  equal(comparison(state).length, 1);
+  equal(comparison(groupView(state, first))[0].current, 1000);
+  editGroups(state, {
+    operation: "move",
+    group_id: second,
+    source_group_id: "ungrouped",
+    product_id: product.id,
+  });
+  equal(productGroupIDs(product), [first, second]);
+  editGroups(state, { operation: "delete", group_id: first });
+  equal(productGroupIDs(product), [second]);
+  equal(comparison(groupView(state, second))[0].current, 1000);
+  equal(state.captures.length, 1);
 });
 Deno.test("bulk group moves validate all selected products before changing membership", () => {
   const state = makeDemo();

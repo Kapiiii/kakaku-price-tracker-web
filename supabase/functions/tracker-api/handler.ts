@@ -1,14 +1,17 @@
 import { createSupabaseContext } from "npm:@supabase/server@1.9.2";
 import {
   activeProducts,
+  addProductsToGroup,
   applyResults,
   archiveProducts,
   canonicalURL,
   clone,
   comparisonPoint,
+  DEFAULT_GROUP,
   editGroups,
   importBackup,
   INITIAL_POINT,
+  productGroups,
   requireGroup,
   shopList,
 } from "../../../docs/core.js";
@@ -200,17 +203,24 @@ export async function dispatch(
         throw new Error("商品URLは一度に100件まで登録できます。");
       }
       const existing = new Set(activeProducts(state).map((p: any) => p.url));
-      const urls = kind === "update"
-        ? [...existing]
-        : [...new Set(body.urls.map(canonicalURL))].filter((url) => !existing.has(url));
-      if (!urls.length) {
-        throw new Error("取得対象の商品がありません。登録済みの商品は一括更新をご利用ください。");
+      const group_id = kind === "add" ? requireGroup(state, body.group_id) : undefined;
+      const requested = kind === "add" ? [...new Set<string>(body.urls.map(canonicalURL))] : [...existing];
+      if (!requested.length) throw new Error("登録または取得する商品がありません。");
+      const urls = kind === "add" ? requested.filter((url) => !existing.has(url)) : requested;
+      const existing_urls = kind === "add" ? requested.filter((url) => existing.has(url)) : [];
+      if (kind === "add" && !urls.length) {
+        const next = await mutate(admin, owner, (data) => {
+          if (!addProductsToGroup(data, existing_urls, requireGroup(data, group_id))) {
+            throw new Error("選んだグループに登録済みです。");
+          }
+          return data;
+        });
+        return { state: next, job: null };
       }
       if (urls.length > 100 || (kind === "add" && existing.size + urls.length > 100)) {
         throw new Error("登録中の商品は100件までにしてください。");
       }
-      const group_id = kind === "add" ? requireGroup(state, body.group_id) : undefined;
-      const payload = { urls, index: 0, results: [], settings: state.settings, group_id };
+      const payload = { urls, index: 0, results: [], settings: state.settings, group_id, existing_urls };
       const job = await rpc(admin, "tracker_start_job", { p_owner: owner, p_kind: kind, p_payload: payload });
       return {
         job: publicJob(job),
@@ -323,6 +333,12 @@ export async function dispatch(
             job.origin === "daily" ? "daily" : job.kind,
             job.created_at,
           );
+        if (job.kind === "add" && payload.existing_urls?.length) {
+          const group = productGroups(state).some((g) => g.id === payload.group_id)
+            ? payload.group_id
+            : DEFAULT_GROUP;
+          addProductsToGroup(state, payload.existing_urls, group);
+        }
         const completedPayload = {
           ...payload,
           results: payload.results.filter((r: any) => r.error).map((r: any) => ({

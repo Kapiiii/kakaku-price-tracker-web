@@ -103,6 +103,22 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
       1000,
     ]);
     equal(comparison(groupView(done.state, "ungrouped")).length, 0);
+    const beforeShare = await get(alice);
+    const shared = await dispatch(admin, alice, {
+      action: "begin",
+      kind: "add",
+      urls: [urls[0]],
+      group_id: "ungrouped",
+    });
+    equal(shared.job, null);
+    equal(shared.state.products.length, 2);
+    equal(shared.state.captures, beforeShare.captures);
+    equal(shared.state.snapshots, beforeShare.snapshots);
+    equal(comparison(groupView(shared.state, "ungrouped"))[0].current, 1000);
+    equal(comparison(groupView(shared.state, group_id)).length, 2);
+    await rejects(() =>
+      dispatch(admin, alice, { action: "begin", kind: "add", urls: [urls[0]], group_id: "ungrouped" })
+    );
     equal(done.state.settings.interval, 5);
     equal(done.state.settings.comparison_point, "initial");
     equal((await get(bob)).products.length, 0);

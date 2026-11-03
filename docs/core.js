@@ -43,7 +43,29 @@ function groupName(value) {
   return value.trim();
 }
 
-export function editGroups(state, { operation, name, group_id, product_id, product_ids }) {
+export const productGroupIDs = (product) => product.group_ids ?? [product.group_id ?? DEFAULT_GROUP];
+
+function setProductGroups(product, ids) {
+  const groups = [...new Set(ids)];
+  product.group_id = groups[0] ?? DEFAULT_GROUP;
+  if (groups.length > 1) product.group_ids = groups;
+  else delete product.group_ids;
+}
+
+export function addProductsToGroup(state, urls, groupID) {
+  const targets = new Set(urls);
+  let added = 0;
+  for (const product of activeProducts(state)) {
+    const groups = productGroupIDs(product);
+    if (targets.has(product.url) && !groups.includes(groupID)) {
+      setProductGroups(product, [...groups, groupID]);
+      added++;
+    }
+  }
+  return added;
+}
+
+export function editGroups(state, { operation, name, group_id, product_id, product_ids, source_group_id }) {
   if (operation === "move") {
     const ids = product_ids ?? [product_id];
     if (
@@ -56,7 +78,18 @@ export function editGroups(state, { operation, name, group_id, product_id, produ
     const selected = new Set(ids);
     const products = activeProducts(state).filter((p) => selected.has(p.id));
     if (products.length !== selected.size) throw new Error("登録商品が見つかりません。");
-    for (const product of products) product.group_id = destination;
+    if (source_group_id && source_group_id !== ALL_GROUPS) {
+      requireGroup(state, source_group_id);
+      if (products.some((product) => !productGroupIDs(product).includes(source_group_id))) {
+        throw new Error("移動元のグループに商品が見つかりません。");
+      }
+    }
+    for (const product of products) {
+      const remaining = source_group_id && source_group_id !== ALL_GROUPS
+        ? productGroupIDs(product).filter((id) => id !== source_group_id)
+        : [];
+      setProductGroups(product, [...remaining, destination]);
+    }
     return destination;
   }
   if (operation === "delete") {
@@ -64,7 +97,8 @@ export function editGroups(state, { operation, name, group_id, product_id, produ
     if (!groups.some((g) => g.id === group_id)) throw new Error("削除するグループが見つかりません。");
     state.groups = groups.filter((g) => g.id !== group_id);
     for (const product of state.products) {
-      if (product.group_id === group_id) product.group_id = DEFAULT_GROUP;
+      const ids = productGroupIDs(product);
+      if (ids.includes(group_id)) setProductGroups(product, ids.filter((id) => id !== group_id));
     }
     return DEFAULT_GROUP;
   }
@@ -91,7 +125,7 @@ export function editGroups(state, { operation, name, group_id, product_id, produ
 
 export function groupView(state, groupID) {
   if (groupID === ALL_GROUPS) return state;
-  const products = state.products.filter((p) => (p.group_id ?? DEFAULT_GROUP) === groupID);
+  const products = state.products.filter((p) => productGroupIDs(p).includes(groupID));
   const ids = new Set(products.map((p) => String(p.id)));
   return {
     ...state,
@@ -283,11 +317,15 @@ export function applyResults(input, results, kind = "update", started = nowISO()
       };
       state.products.push(product);
     }
-    if ((fresh || product.archived_at) && result.group_id !== undefined) {
+    if (result.group_id !== undefined) {
       // 登録開始の直前に別の画面で追加先が削除された場合も、商品は保存する。
-      product.group_id = productGroups(state).some((g) => g.id === result.group_id)
+      const group = productGroups(state).some((g) => g.id === result.group_id)
         ? result.group_id
         : DEFAULT_GROUP;
+      setProductGroups(
+        product,
+        fresh || product.archived_at ? [group] : [...productGroupIDs(product), group],
+      );
     }
     product.archived_at = null;
     if (result.metadata) {
@@ -518,11 +556,20 @@ export function importBackup(input) {
     pids.add(id);
     urls.add(url);
     if (!Number.isFinite(+new Date(p.created_at))) throw new Error("登録日時が正しくありません。");
+    const groups = productGroupIDs(p);
+    if (
+      !Array.isArray(groups) || !groups.length || groups.length > MAX_GROUPS + 1 ||
+      new Set(groups).size !== groups.length || groups.some((id) => typeof id !== "string")
+    ) {
+      throw new Error("商品のグループを確認してください。");
+    }
+    groups.forEach((id) => requireGroup(state, id));
     return {
       id,
       url,
       product_key: url.split("/").at(-2),
-      group_id: requireGroup(state, p.group_id ?? DEFAULT_GROUP),
+      group_id: groups[0],
+      ...(groups.length > 1 ? { group_ids: groups } : {}),
       name: String(p.name ?? "").slice(0, 500),
       image_url: safeURL(p.image_url) || null,
       created_at: new Date(p.created_at).toISOString(),
