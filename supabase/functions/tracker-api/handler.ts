@@ -137,7 +137,18 @@ export async function dispatch(
             !(typeof comparison_point === "string" &&
               data.snapshots.some((s: any) => s.id === comparison_point))
           ) throw new Error("比較する保存時点を確認してください。");
-          data.settings = { interval, max_shops, daily_enabled, daily_hour, comparison_point };
+          const fallback_enabled = body.settings.fallback_enabled ?? data.settings.fallback_enabled ?? true;
+          if (typeof fallback_enabled !== "boolean") {
+            throw new Error("代替参考価格の設定を確認してください。");
+          }
+          data.settings = {
+            interval,
+            max_shops,
+            daily_enabled,
+            daily_hour,
+            comparison_point,
+            fallback_enabled,
+          };
         }
         return data;
       }, true);
@@ -205,7 +216,14 @@ export async function dispatch(
         });
         if (delay > 0) await sleep(delay);
       };
-      if (payload.pendingFallback) {
+      if (
+        payload.pendingFallback && (await readState(admin, owner)).data.settings.fallback_enabled === false
+      ) {
+        const { error, metadata } = payload.pendingFallback;
+        payload.results.push({ url, error, metadata });
+        payload.pendingFallback = null;
+        payload.index++;
+      } else if (payload.pendingFallback) {
         const result = await advanceFallback(
           payload.pendingFallback,
           payload.settings,
@@ -237,7 +255,7 @@ export async function dispatch(
           const metadata = error instanceof PriceError ? error.metadata : null;
           const state = (await readState(admin, owner)).data;
           const product = state.products.find((p: any) => p.url === url);
-          const searchURL = !stopped &&
+          const searchURL = !stopped && state.settings.fallback_enabled !== false &&
             productFallbackURL({
               ...product,
               ...(metadata?.category_url ? { auto_fallback_url: metadata.category_url } : {}),

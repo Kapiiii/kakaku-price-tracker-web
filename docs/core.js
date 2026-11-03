@@ -3,7 +3,7 @@ export const nowISO = () => new Date().toISOString();
 export const uid = () => crypto.randomUUID();
 export const clone = (value) => structuredClone(value);
 export const INITIAL_POINT = "initial";
-/** @returns {{schema_version:number,products:any[],captures:any[],snapshots:any[],excluded:string[],settings:{interval:number,max_shops:number,daily_enabled:boolean,daily_hour:number,comparison_point:string}}} */
+/** @returns {{schema_version:number,products:any[],captures:any[],snapshots:any[],excluded:string[],settings:{interval:number,max_shops:number,daily_enabled:boolean,daily_hour:number,comparison_point:string,fallback_enabled:boolean}}} */
 export function emptyState() {
   return {
     schema_version: 1,
@@ -17,6 +17,7 @@ export function emptyState() {
       daily_enabled: true,
       daily_hour: 9,
       comparison_point: INITIAL_POINT,
+      fallback_enabled: true,
     },
   };
 }
@@ -174,6 +175,32 @@ export function comparableDelta(rows, current, reference) {
 export function comparisonPoint(state) {
   const saved = state.settings?.comparison_point;
   return typeof saved === "string" && state.snapshots.some((s) => s.id === saved) ? saved : INITIAL_POINT;
+}
+export function priceView(state) {
+  if (state.settings?.fallback_enabled !== false) return state;
+  const actual = new Map(), replacements = new Map();
+  const captures = state.captures.filter((capture) => {
+    const product = String(capture.product_id);
+    if (capture.source === "fallback") {
+      replacements.set(String(capture.id), actual.get(product) ?? null);
+      return false;
+    }
+    actual.set(product, capture.id);
+    return true;
+  });
+  if (!replacements.size) return state;
+  return {
+    ...state,
+    captures,
+    snapshots: state.snapshots.map((snapshot) => ({
+      ...snapshot,
+      items: snapshot.items.map((item) =>
+        replacements.has(String(item.capture_id))
+          ? { ...item, capture_id: replacements.get(String(item.capture_id)), status: "error" }
+          : item
+      ),
+    })),
+  };
 }
 export function comparison(state, pastId = comparisonPoint(state)) {
   const captures = capMap(state), current = itemMap(lastSnapshot(state));
@@ -541,6 +568,7 @@ export function importBackup(input) {
   state.excluded = [...new Set((state.excluded ?? []).map(String))].slice(0, 2000);
   state.settings = {
     comparison_point: comparisonPoint(state),
+    fallback_enabled: state.settings?.fallback_enabled !== false,
     interval: Math.max(3, Math.min(30, Number(state.settings?.interval) || 3)),
     max_shops: [10, 15, 20].includes(state.settings?.max_shops) ? state.settings.max_shops : 20,
     daily_enabled: state.settings?.daily_enabled !== false,

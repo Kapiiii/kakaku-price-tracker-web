@@ -4,7 +4,7 @@ export function categoryURL(value) {
   const u = new URL(String(value));
   if (
     u.protocol !== "https:" || u.hostname !== "kakaku.com" || u.port || u.username || u.password ||
-    !/^\/(?:pc|kaden|camera|keitai)\/[a-z0-9-]+\/itemlist\.aspx$/.test(u.pathname)
+    !/^\/[a-z0-9-]+\/[a-z0-9-]+\/itemlist\.aspx$/.test(u.pathname)
   ) {
     throw new Error("価格.comで条件を絞った製品一覧のURLを指定してください。");
   }

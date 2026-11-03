@@ -1,7 +1,7 @@
 import { parseHTML } from "npm:linkedom@0.18.14";
 import robotsParser from "npm:robots-parser@3.0.1";
 import { canonicalURL, safeURL, validateData } from "../../../docs/core.js";
-import { categoryURL, FALLBACK_LIMIT, inferredCategory } from "../../../docs/fallback.js";
+import { categoryURL, FALLBACK_LIMIT, inferredCategory, optionalCategory } from "../../../docs/fallback.js";
 
 export const USER_AGENT = "PriceNoteTracker/1.0 (personal price comparison)";
 export class PriceError extends Error {
@@ -30,6 +30,52 @@ export function decodeHTML(bytes: Uint8Array): string {
     } catch { /* 次の文字コードを確認 */ }
   }
   throw new PriceError("HTMLの文字コードを判別できませんでした。");
+}
+function specCategory(doc: Document, url: string, rows: Element[]) {
+  const baseValue = doc.querySelector("#specLinkDefaultUrl")?.getAttribute("value");
+  const links = rows.flatMap((row) => [...row.querySelectorAll("td a")]);
+  const resolve = (value: string | null | undefined) => {
+    try {
+      return value ? optionalCategory(new URL(value, url).href) : null;
+    } catch {
+      return null;
+    }
+  };
+  let base = baseValue ? resolve(`${baseValue.split("?")[0]}?pdf_Spec1=1`) : null;
+  base ??= links.map((link) => resolve(link.getAttribute("href"))).find(Boolean) ?? null;
+  if (!base) return null;
+  const target = new URL(base);
+  target.search = "";
+  const fields = new URLSearchParams();
+  // 価格.comが製品仕様の値に付けた検索条件を再利用する。
+  for (const row of rows) {
+    const cells = [...row.children];
+    for (let i = 0; i < cells.length - 1; i++) {
+      const [heading, value] = [cells[i], cells[i + 1]];
+      if (heading.tagName !== "TH" || value.tagName !== "TD") continue;
+      const label = text(heading.firstChild).replace(/\s/g, "");
+      if (
+        !/^(搭載チップ|容量|メモリ容量|容量(GB|TB)|規格サイズ|サイズ|インターフェイス|タイプ|NVMe|メモリ規格|メモリインターフェイス|メモリ種類|メモリクロック|モニタサイズ|画面サイズ|解像度|CPU|CPUソケット|ソケット形状|フォームファクタ|チップセット|対応ソケット|接続方式|接続インターフェース|電源容量|定格出力)$/
+          .test(label)
+      ) continue;
+      const link = value.querySelector("a");
+      if (!link) continue;
+      const script = link.getAttribute("onclick")?.match(
+        /^\s*SpecLink\.ChangeLocation\(['"](pdf_Spec\d+=[\w.,+-]+)['"]\);?\s*$/,
+      )?.[1];
+      const filter = resolve(link.getAttribute("href")) ??
+        (baseValue && script ? resolve(`${target.href}?${script}`) : null);
+      if (!filter) continue;
+      const source = new URL(filter);
+      if (source.pathname !== target.pathname) continue;
+      for (const [key, value] of source.searchParams) {
+        if (/^pdf_Spec\d+$/.test(key)) fields.set(key, value);
+      }
+      if (label === "搭載チップ") return filter;
+    }
+  }
+  target.search = fields.toString();
+  return optionalCategory(target.href);
 }
 export function parseProduct(html: string, inputURL: string, maxShops = 20, source = "live") {
   const url = canonicalURL(inputURL);
@@ -82,9 +128,10 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
   if (Array.isArray(image)) image = image[0];
   if (image && typeof image === "object") image = image.url;
   image = image || doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
-  const chipRow = [
+  const specRows = [
     ...doc.querySelectorAll(".p-spec_table tr,#specBox tr,#specTbl tr,.p-specTable tr,.spec_tbl tr"),
-  ].find((row) =>
+  ];
+  const chipRow = specRows.find((row) =>
     [...row.children].some((cell) => cell.tagName === "TH" && text(cell).replace(/\s/g, "") === "搭載チップ")
   );
   const chip = chipRow
@@ -93,7 +140,7 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
   const metadata = {
     name,
     image_url: safeURL(image) || null,
-    category_url: inferredCategory(
+    category_url: specCategory(doc, url, specRows) ?? inferredCategory(
       chip || name + " " + String(selected[0]?.description ?? ""),
     ),
   };

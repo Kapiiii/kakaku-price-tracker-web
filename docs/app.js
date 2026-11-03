@@ -1,7 +1,7 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
-import { categoryURL, productFallbackURL, RTX5080_URL } from "./fallback.js";
+import { categoryURL, productFallbackURL, RTX5080_URL } from "./fallback.js?v=broader-fallback";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -25,12 +25,13 @@ import {
   itemMap,
   makeDemo,
   minimum,
+  priceView,
   productGroups,
   safeURL,
   shopList,
   summary,
   yen,
-} from "./core.js?v=group-delete";
+} from "./core.js?v=broader-fallback";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -135,8 +136,8 @@ function fallbackSettings(product) {
     : product.fallback_mode ?? "auto";
   return `<form class="fallback-settings section-space" data-fallback-product="${
     esc(product.id)
-  }"><h3>代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定はRTX 5080に対応しています。ほかのGPUや商品は、価格.comで条件を絞った製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
-    [["auto", "自動判定（RTX 5080）"], ["rtx5080", "RTX 5080搭載モデル（メーカー問わず）"], [
+  }"><h3>代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
+    [["auto", "自動判定（商品仕様から）"], ["rtx5080", "RTX 5080搭載モデル（メーカー問わず）"], [
       "custom",
       "絞り込み一覧を指定",
     ], ["off", "代替価格を使わない"]].map(([value, label]) =>
@@ -439,7 +440,7 @@ function snapshotSelect() {
   }</select>`;
 }
 function renderCompare() {
-  const view = groupView(state, groupID);
+  const view = priceView(groupView(state, groupID));
   const rows = comparison(view, pastId),
     sums = ["past", "current", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
     pastDiff = comparableDelta(rows, "current", "past");
@@ -475,7 +476,7 @@ function renderCompare() {
     ).join("")
   }</div>${
     estimates
-      ? `<div class="banner warning">${estimates}商品に、条件が合う別商品の「代替参考価格」を使用しています。取得した候補・ショップ内の最安値です。商品名と取得元は詳細から確認できます。</div>`
+      ? `<div class="banner warning">${estimates}商品に、条件が合う別商品の「代替参考価格」を使用しています。取得した候補・ショップ内の最安値です。商品名と取得元は詳細から確認できます。「設定・データ」の「代替参考価格を使う」をOFFにすると、代替参考価格の取得と表示を停止できます。 <button class="ghost small-button" data-tab="manage">設定・データを開く</button></div>`
       : ""
   }${
     carried
@@ -548,7 +549,7 @@ function emptyView() {
 }
 function historyRows() {
   const cutoff = range === "all" ? 0 : Date.now() - Number(range) * 86400000;
-  return basketHistory(groupView(state, groupID), fixed).filter((r) =>
+  return basketHistory(priceView(groupView(state, groupID)), fixed).filter((r) =>
     +new Date(r.date) >= cutoff && (groupID === ALL_GROUPS || fixed || r.raw.count > 0)
   );
 }
@@ -658,15 +659,16 @@ function renderHistory() {
   }</tbody></table></div><div class="table-foot">過去の除外後総額も、現在チェックしているショップを除外して再計算します。当時未取得の商品には未来の価格を補いません。</div></section>`;
 }
 function renderProduct() {
+  const view = priceView(state);
   const products = visibleProducts(),
     p = products.find((p) => p.id === selectedProduct),
-    cm = capMap(state),
-    row = comparison(state, pastId).find((r) => r.id === selectedProduct);
+    cm = capMap(view),
+    row = comparison(view, pastId).find((r) => r.id === selectedProduct);
   if (!p) {
     $("#content").innerHTML = `<section class="panel">${emptyView()}</section>`;
     return;
   }
-  const captures = state.captures.filter((c) => c.product_id === p.id), capture = captures.at(-1);
+  const captures = view.captures.filter((c) => c.product_id === p.id), capture = captures.at(-1);
   $("#content").innerHTML =
     `<section class="panel"><div class="panel-header"><div><h2>商品を選択</h2></div><select aria-label="履歴を見る商品" data-product-select>${
       products.map((q) =>
@@ -727,7 +729,7 @@ function renderProduct() {
         }</small></td></tr>`
       ).join("") || '<tr><td colspan="4">店舗別価格はまだありません。</td></tr>'
     }</tbody></table></div></section><section class="panel"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
-      [...state.snapshots].reverse().flatMap((s) => {
+      [...view.snapshots].reverse().flatMap((s) => {
         const item = itemMap(s).get(p.id);
         if (!item) return [];
         const c = cm.get(item.capture_id);
@@ -757,7 +759,9 @@ function renderManage() {
         `<option value="${hour}" ${(state.settings.daily_hour ?? 9) === hour ? "selected" : ""}>毎日 ${
           String(hour).padStart(2, "0")
         }:00</option>`).join("")
-    }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
+    }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="row"><input type="checkbox" name="fallback_enabled" ${
+      state.settings.fallback_enabled !== false ? "checked" : ""
+    }>代替参考価格を使う</label><p class="help">OFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
     }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
@@ -821,7 +825,7 @@ function updateSharePreview() {
   $(`[data-action="share-copy-link"]`).disabled = !link;
 }
 function showSnapshot(id) {
-  const view = groupView(state, groupID);
+  const view = priceView(groupView(state, groupID));
   const s = view.snapshots.find((s) => s.id === id), cm = capMap(view);
   if (!s) return;
   modal(
@@ -1110,7 +1114,7 @@ async function action(name) {
     download(
       "price-comparison.csv",
       csv(
-        comparison(groupView(state, groupID), pastId).map((r) => ({
+        comparison(priceView(groupView(state, groupID)), pastId).map((r) => ({
           商品名: r.name,
           URL: r.url,
           初回価格: r.initial,
@@ -1309,6 +1313,7 @@ document.addEventListener("submit", async (event) => {
         interval: Number(data.get("interval")),
         max_shops: Number(data.get("max_shops")),
         daily_enabled: data.get("daily_enabled") === "on",
+        fallback_enabled: data.get("fallback_enabled") === "on",
         daily_hour: Number(data.get("daily_hour")),
       };
       queuePrefs();

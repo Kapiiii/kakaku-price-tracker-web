@@ -8,6 +8,7 @@ import {
   comparison,
   emptyState,
   importBackup,
+  priceView,
 } from "../docs/core.js";
 import { advanceFallback } from "../supabase/functions/_shared/fallback-step.ts";
 import {
@@ -123,6 +124,18 @@ Deno.test("resumable fallback retains shop-specific provenance, exclusions and i
     urls[1],
   ]);
   equal(row.capture.source, "fallback");
+  state.settings.fallback_enabled = false;
+  const actualOnly = priceView(state);
+  equal(comparison(actualOnly, first)[0].current, 1500);
+  equal(comparison(actualOnly, first)[0].filtered, 1600);
+  equal(basketHistory(actualOnly).at(-1)?.value, 1500);
+  equal(state.captures.at(-1).source, "fallback");
+  equal(importBackup({ format_version: "cloud-1", data: state }).settings.fallback_enabled, false);
+  const noActual = applyResults(emptyState(), [result.result!], "add");
+  noActual.settings.fallback_enabled = false;
+  equal(comparison(priceView(noActual))[0].current, null);
+  equal(comparison(priceView(noActual))[0].initial, null);
+  state.settings.fallback_enabled = true;
   equal(comparableDelta([row], "current", "past").amount, null);
   equal(basketHistory(state).at(-1)!.delta, null);
   const restored = importBackup({ format_version: "cloud-1", data: state });
@@ -152,6 +165,25 @@ Deno.test("fallback failure preserves last prices; access blocks stop without by
   const state = applyResults(initial, [result.result!]);
   equal(comparison(state)[0].current, 800);
   equal(state.captures.length, 1);
+});
+Deno.test("SSD alternatives use spec links for capacity and form factor from the product page", () => {
+  const html = `<title>2TB SSD</title><h1>テストSSD</h1>
+  <input id="specLinkDefaultUrl" value="https://kakaku.com/pc/ssd/itemlist.aspx">
+  <table class="p-spec_table"><tr>
+  <th>容量</th><td><a href="javascript:void(0)" onclick="SpecLink.ChangeLocation('pdf_Spec301=2000');">2000 GB</a></td>
+  <th>規格サイズ<div>用語説明</div></th><td><a href="/pc/ssd/itemlist.aspx?pdf_Spec102=8">M.2</a></td>
+  </tr><tr><th>厚さ</th><td><a href="/pc/ssd/itemlist.aspx?pdf_Spec302=2.3">2.3 mm</a></td>
+  <th>タイプ</th><td><a href="https://other.example/pc/ssd/itemlist.aspx?pdf_Spec104=1">内蔵</a></td></tr></table>`;
+  try {
+    parseProduct(html, original);
+    throw new Error("expected missing prices");
+  } catch (error) {
+    assert(error instanceof PriceError);
+    equal(
+      error.metadata.category_url,
+      "https://kakaku.com/pc/ssd/itemlist.aspx?pdf_Spec102=8&pdf_Spec301=2000&pdf_so=p1",
+    );
+  }
 });
 Deno.test("model-number titles use the product chipset field and ignore unrelated RTX mentions", () => {
   const inspect = (chip: string, title = "GV-N5080WF3-16GD [PCIExp 16GB]", scoped = true) => {
