@@ -163,13 +163,23 @@ export async function dispatch(
     case "fallback-preferences": {
       const mode = body.mode;
       if (!["auto", "custom", "off"].includes(mode)) throw new Error("代替価格の条件を確認してください。");
+      const ids = body.product_ids ?? [body.product_id];
+      if (
+        !Array.isArray(ids) || !ids.length || ids.length > 100 ||
+        ids.some((id: unknown) => typeof id !== "string" || !id)
+      ) {
+        throw new Error("代替条件を設定する商品を選択してください。");
+      }
+      const selected = new Set(ids);
       const url = mode === "custom" ? categoryURL(body.url) : null;
       return {
         state: await mutate(admin, owner, (state) => {
-          const product = activeProducts(state).find((p: any) => p.id === body.product_id);
-          if (!product) throw new Error("登録商品が見つかりません。");
-          product.fallback_mode = mode;
-          product.fallback_url = url;
+          const products = activeProducts(state).filter((p: any) => selected.has(p.id));
+          if (products.length !== selected.size) throw new Error("登録商品が見つかりません。");
+          for (const product of products) {
+            product.fallback_mode = mode;
+            product.fallback_url = url;
+          }
           return state;
         }),
       };
@@ -222,8 +232,10 @@ export async function dispatch(
         });
         if (delay > 0) await sleep(delay);
       };
+      const fallbackState = payload.pendingFallback ? (await readState(admin, owner)).data : null;
       if (
-        payload.pendingFallback && (await readState(admin, owner)).data.settings.fallback_enabled === false
+        fallbackState && (fallbackState.settings.fallback_enabled === false ||
+          !["auto", "custom"].includes(fallbackState.products.find((p: any) => p.url === url)?.fallback_mode))
       ) {
         const { error, metadata } = payload.pendingFallback;
         payload.results.push({ url, error, metadata });

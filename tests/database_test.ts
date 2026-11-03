@@ -253,6 +253,17 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
     equal(complete.state.products[0].name, "テスト商品");
     equal(comparison(complete.state)[0].filtered, 850);
     equal(complete.state.settings.comparison_point, "initial");
+    const product_ids = complete.state.products.map((p: { id: string }) => p.id);
+    await rejects(() =>
+      dispatch(admin, alice, {
+        action: "fallback-preferences",
+        product_ids: [...product_ids, "unknown"],
+        mode: "off",
+      })
+    );
+    equal((await get(alice)).products[0].fallback_url, category);
+    const bulk = await dispatch(admin, alice, { action: "fallback-preferences", product_ids, mode: "auto" });
+    equal(bulk.state.products.map((p: { fallback_mode: string }) => p.fallback_mode), ["auto", "auto"]);
   } finally {
     await db.close();
   }

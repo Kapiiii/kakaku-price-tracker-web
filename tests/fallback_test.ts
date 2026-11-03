@@ -49,6 +49,8 @@ Deno.test("fallback targets require constrained Kakaku category URLs and can be 
   equal(inferredCategory("RTX 5080 Ti"), null);
   equal(inferredCategory("RTX 5080 Laptop GPU"), null);
   equal(productFallbackURL({ name: "RTX 5080", fallback_mode: "off" }), null);
+  equal(productFallbackURL({ name: "RTX 5080", auto_fallback_url: RTX5080_URL }), null);
+  equal(productFallbackURL({ name: "RTX 5080", fallback_mode: "auto" }), RTX5080_URL);
   equal(
     productFallbackURL({ name: "不明", fallback_mode: "custom", fallback_url: RTX5080_URL }),
     RTX5080_URL,

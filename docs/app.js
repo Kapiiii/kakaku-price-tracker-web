@@ -1,7 +1,7 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js?v=github-only";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
-import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=broader-fallback";
+import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=bulk-fallback";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -30,7 +30,7 @@ import {
   shopList,
   summary,
   yen,
-} from "./core.js?v=broader-fallback";
+} from "./core.js?v=bulk-fallback";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -130,7 +130,7 @@ function alternative(offer) {
     : "";
 }
 function fallbackSettings(product) {
-  const mode = product.fallback_mode ?? "auto";
+  const mode = product.fallback_mode ?? "off";
   const enabled = state.settings.fallback_enabled !== false;
   const searchURL = enabled ? productFallbackURL(product) : null;
   const condition = !enabled
@@ -142,22 +142,27 @@ function fallbackSettings(product) {
     : "自動検索に使える条件はまだありません。次回の商品取得時に判定します。";
   return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
-  }"><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
-    [["auto", "自動判定（商品仕様から）"], [
+  }"><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p>${
+    fallbackFields(mode, product.fallback_url)
+  }<p class="help">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
+    job ? "disabled" : ""
+  }>代替条件を保存</button><p class="help">現在の設定：${condition}</p></form>`;
+}
+function fallbackFields(mode, url = "") {
+  return `<label class="field">代替候補<select name="mode" data-fallback-mode>${
+    [["off", "代替価格を使わない"], ["auto", "自動判定（商品仕様から）"], [
       "custom",
       "絞り込み一覧を指定",
-    ], ["off", "代替価格を使わない"]].map(([value, label]) =>
+    ]].map(([value, label]) =>
       `<option value="${value}" ${value === mode ? "selected" : ""}>${label}</option>`
     ).join("")
   }</select></label><div data-fallback-url ${
     mode === "custom" ? "" : "hidden"
   }><label class="field">条件を絞った製品一覧のURL<input name="fallback_url" type="url" value="${
-    esc(product.fallback_url ?? "")
+    esc(url ?? "")
   }" ${
     mode === "custom" ? "required" : "disabled"
-  } placeholder="https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499"></label></div><p class="help">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
-    job ? "disabled" : ""
-  }>代替条件を保存</button><p class="help">現在の設定：${condition}</p></form>`;
+  } placeholder="https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499"></label></div>`;
 }
 async function api(action, values = {}) {
   const requestEpoch = epoch, owner = user?.id;
@@ -863,7 +868,9 @@ function renderProduct() {
       ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
     }</tbody></table></div></section></div><section class="panel section-space"><div class="panel-header"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3></div><div class="panel-body">${
       productSelect(products, "fallback", "代替条件を設定する商品")
-    }${fallbackSettings(p)}</div></section>`;
+    }${fallbackSettings(p)}<button class="small-button section-space" data-action="bulk-fallback" ${
+      job ? "disabled" : ""
+    }>複数商品の代替条件を設定</button></div></section>`;
 }
 function showDeletionStatus(panel, status) {
   panel.innerHTML = status.delete_at
@@ -1028,6 +1035,24 @@ async function runJob() {
   }
 }
 async function action(name) {
+  if (name === "bulk-fallback") {
+    if (job) return;
+    const products = visibleProducts();
+    modal(
+      `<h2>複数商品の代替条件を設定</h2><p>表示中のグループから対象商品を選ぶと、選んだすべての商品に同じ設定が適用されます。</p>
+      <form data-fallback-bulk><fieldset class="share-selection"><legend>対象商品</legend><div class="share-product-options">${
+        products.map((p) =>
+          `<label class="share-product-option"><input name="product" type="checkbox" value="${esc(p.id)}" ${
+            p.id === selectedProduct ? "checked" : ""
+          }><span>${esc(p.name)}</span></label>`
+        ).join("")
+      }</div></fieldset>
+      ${
+        fallbackFields("off")
+      }<div class="actions"><button type="button" data-close>キャンセル</button><button class="primary" type="submit">選んだ商品に保存</button></div></form>`,
+    );
+    return;
+  }
   if (name === "schedule-account-deletion") {
     modal(
       '<h2>アカウントの削除を予約しますか？</h2><p>30日後にPRICE NOTEのアカウントと、登録商品・価格履歴・設定を削除します。GitHubなど、ログインに使った外部サービスのアカウントには影響しません。</p><form data-account-deletion><label class="row"><input type="checkbox" name="confirm" required>30日後に削除されることを確認しました</label><div class="actions"><button type="button" data-close autofocus>キャンセル</button><button class="danger" type="submit">削除を予約する</button></div></form>',
@@ -1478,19 +1503,24 @@ document.addEventListener("submit", async (event) => {
           ? "商品を移動しました。"
           : "グループを保存しました。",
       );
-    } else if (form.hasAttribute("data-fallback-product")) {
+    } else if (form.hasAttribute("data-fallback-product") || form.hasAttribute("data-fallback-bulk")) {
+      const bulk = form.hasAttribute("data-fallback-bulk");
+      const product_ids = bulk ? data.getAll("product") : [form.dataset.fallbackProduct];
+      if (!product_ids.length) throw new Error("代替条件を設定する商品を選択してください。");
       const mode = String(data.get("mode"));
       const url = mode === "custom" ? categoryURL(data.get("fallback_url")) : null;
       await flushPrefs();
       if (demo) {
-        const product = state.products.find((p) => p.id === form.dataset.fallbackProduct);
-        product.fallback_mode = mode;
-        product.fallback_url = url;
-      } else {adopt(
-          (await api("fallback-preferences", { product_id: form.dataset.fallbackProduct, mode, url })).state,
-        );}
+        for (const product of visibleProducts().filter((p) => product_ids.includes(p.id))) {
+          product.fallback_mode = mode;
+          product.fallback_url = url;
+        }
+      } else {
+        adopt((await api("fallback-preferences", { product_ids, mode, url })).state);
+      }
+      if (bulk) $("#modal").close();
       preserveScroll(renderContent);
-      notify("代替条件を保存しました。次回の価格更新から適用します。");
+      notify(`${product_ids.length}商品の代替条件を保存しました。次回の価格更新から適用します。`);
     } else if (form.hasAttribute("data-settings")) {
       state.settings = {
         ...state.settings,

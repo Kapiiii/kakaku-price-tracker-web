@@ -519,7 +519,7 @@ export function importBackup(input) {
       created_at: new Date(p.created_at).toISOString(),
       archived_at: p.archived_at ? new Date(p.archived_at).toISOString() : null,
       initial_capture_id: p.initial_capture_id == null ? null : String(p.initial_capture_id),
-      fallback_mode: ["off", "custom"].includes(p.fallback_mode) ? p.fallback_mode : "auto",
+      fallback_mode: ["auto", "custom"].includes(p.fallback_mode) ? p.fallback_mode : "off",
       fallback_url: p.fallback_mode === "custom" ? categoryURL(p.fallback_url) : null,
       auto_fallback_url: optionalCategory(p.auto_fallback_url),
     };

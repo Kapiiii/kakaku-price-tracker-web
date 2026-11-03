@@ -37,9 +37,9 @@ export function inferredCategory(name) {
     : null;
 }
 export function productFallbackURL(product) {
-  if (product?.fallback_mode === "off") return null;
   if (product?.fallback_mode === "custom") return optionalCategory(product.fallback_url);
-  return optionalCategory(product?.auto_fallback_url) || inferredCategory(product?.name);
+  if (product?.fallback_mode !== "auto") return null;
+  return optionalCategory(product.auto_fallback_url) || inferredCategory(product.name);
 }
 export const priceBasis = (capture) =>
   capture?.source === "fallback" ? `fallback:${capture.fallback.search_url}` : "actual";
