@@ -259,30 +259,170 @@ hr {
   line-height: 1.9;
   margin-top: 22px;
 }
-.mini-card {
-  background: #fff;
-  border: 1px solid #dbe7dd;
-  border-radius: 14px;
-  padding: 22px;
-  margin: 30px 0 0;
-  box-shadow: 0 12px 40px #24472d08;
+.feature-carousel {
+  max-width: 580px;
+  margin-top: 25px;
+  padding: 17px;
+  border: 1px solid #b6cbbd;
+  border-radius: 22px;
+  background: radial-gradient(ellipse at top right, #f5efdb, transparent 65%), #f2f8f2;
+  box-shadow: 0 14px 36px #24472d12;
 }
-.mini-card strong {
-  font-size: 31px;
-  display: block;
-  margin-top: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.mini-card svg {
-  width: 100%;
-  height: 70px;
-  margin-top: 14px;
-}
-.mini-caption {
+.feature-carousel-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: #456252;
+  font-size: 11px;
+  margin: 0 3px 12px;
+}
+.feature-slide {
+  min-height: 235px;
+  border: 1px solid #d7e3d8;
+  border-radius: 15px;
+  background: #fff;
+  padding: 18px;
+  animation: feature-in .24s ease-out;
+}
+.feature-slide h2 {
+  font-size: clamp(18px, 2vw, 23px);
+  line-height: 1.35;
+  margin: 6px 0;
+  color: #183e33;
+}
+.login-story .feature-slide p {
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+@keyframes feature-in {
+  from {
+    opacity: .55;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .feature-slide {
+    animation: none;
+  }
+}
+.feature-preview {
+  min-height: 95px;
+  border-radius: 10px;
+  background: #eef5ef;
+  padding: 10px;
+  color: #194a3b;
+  font-variant-numeric: tabular-nums;
+}
+.feature-preview strong {
+  display: block;
+  font-size: clamp(14px, 1.6vw, 22px);
+  line-height: 1.3;
+}
+.feature-preview small {
+  display: block;
+  color: #466257;
   font-size: 10px;
-  color: #8d9d91;
+}
+.feature-prices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 4px;
+}
+.feature-prices div {
+  padding: 6px 3px;
+}
+.feature-prices div:nth-child(2) {
+  background: #dceee4;
+  border-radius: 6px;
+}
+.feature-trend {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.feature-trend svg {
+  display: block;
+  width: 100%;
+  height: 68px;
+}
+.feature-trend span,
+.feature-alternative span {
+  font-size: 11px;
+  font-weight: 700;
+}
+.feature-list div {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 4px;
+  font-size: 12px;
+}
+.feature-list div + div {
+  border-top: 1px solid #ccded1;
+}
+.feature-alternative {
+  background: #f5f0e2;
+}
+.feature-alternative span {
+  display: inline-block;
+  background: #eaddba;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.feature-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 10px;
+}
+.feature-controls > button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  color: #185747;
+  font-size: 19px;
+}
+.feature-dots {
+  display: flex;
+}
+.feature-dots button {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.feature-dots button::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 10px;
+  background: #708f80;
+}
+.feature-dots button[aria-current="true"]::after {
+  width: 20px;
+  background: #17665a;
+}
+@media (max-width: 400px) {
+  .feature-carousel {
+    padding: 11px;
+  }
+  .feature-slide {
+    padding: 13px;
+  }
+  .feature-prices {
+    padding: 6px;
+  }
 }
 .app-shell {
   display: grid;
@@ -1098,8 +1238,7 @@ details summary {
   .login-story h1 {
     font-size: 31px;
   }
-  .login-story footer,
-  .mini-card {
+  .login-story footer {
     display: none;
   }
   .login-action {

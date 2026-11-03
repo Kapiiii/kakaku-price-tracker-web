@@ -269,9 +269,78 @@ async function flushPrefs() {
   }
   await prefsChain;
 }
+const loginFeatures = [
+  {
+    tag: "01 / COMPARE",
+    title: "買い物リストの総額を比べる",
+    description: "指定した時点・現在・ショップ除外後の総額を、ひとつの画面で比較。",
+    preview:
+      `<div class="feature-preview feature-prices"><div><small>指定時点</small><strong>¥74,580</strong></div><div><small>現在の最安</small><strong>¥69,760</strong></div><div><small>ショップ除外後</small><strong>¥70,870</strong></div></div>`,
+  },
+  {
+    tag: "02 / HISTORY",
+    title: "値動きから買い時を探す",
+    description: "商品ごと、リスト全体のどちらもグラフで確認。毎日の自動更新で価格がたまります。",
+    preview:
+      `<div class="feature-preview feature-trend"><div><small>リストの総額</small><strong>¥69,760</strong><span>↘ ¥4,820</span></div><svg viewBox="0 0 250 74" preserveAspectRatio="none"><path d="M2 8L44 17L84 12L126 43L168 35L206 56L248 62V74H2Z" fill="#dceee4"/><path d="M2 8L44 17L84 12L126 43L168 35L206 56L248 62" fill="none" stroke="#17665a" stroke-width="3"/><circle cx="248" cy="62" r="3" fill="#17665a"/></svg></div>`,
+  },
+  {
+    tag: "03 / ORGANIZE",
+    title: "用途別にまとめて管理",
+    description: "「自作PC」や「新生活」など、好きな名前でグループを作成。商品URLのリストも共有できます。",
+    preview:
+      `<div class="feature-preview feature-list"><div><span>▦　自作PC</span><small>3 商品</small></div><div><span>▦　新生活</span><small>5 商品</small></div><div><span>↗　商品URLリストを共有</span></div></div>`,
+  },
+  {
+    tag: "04 / ALTERNATIVES",
+    title: "価格が取れないときも見積もる",
+    description: "条件が合う別商品の価格を参考に。利用のON・OFFや候補の条件は設定できます。",
+    preview:
+      `<div class="feature-preview feature-alternative"><small>参考見積もり</small><strong>¥18,980</strong><span>代替参考価格</span><small>例　同じ容量・形状のSSD</small></div>`,
+  },
+];
+function featureCarousel() {
+  return `<section class="feature-carousel" aria-label="PRICE NOTEの機能紹介" aria-roledescription="カルーセル">
+    <div class="feature-carousel-header"><span class="eyebrow">FEATURE TOUR</span><span>機能紹介 · 表示はサンプル</span></div>
+    <div aria-live="polite">${
+    loginFeatures.map((feature, index) =>
+      `<article class="feature-slide" data-feature-slide ${index ? "hidden" : ""}>
+        <span class="eyebrow">${feature.tag}</span><h2>${feature.title}</h2><p>${feature.description}</p>
+        <div aria-hidden="true">${feature.preview}</div>
+      </article>`
+    ).join("")
+  }</div>
+    <div class="feature-controls">
+      <button type="button" data-feature="previous" aria-label="前の機能">←</button>
+      <div class="feature-dots" role="group" aria-label="紹介する機能を選ぶ">${
+    loginFeatures.map((feature, index) =>
+      `<button type="button" data-feature="${index}" aria-label="${feature.title}" aria-current="${
+        index === 0
+      }"></button>`
+    ).join("")
+  }</div>
+      <button type="button" data-feature="next" aria-label="次の機能">→</button>
+    </div>
+  </section>`;
+}
+function showFeature(choice) {
+  const slides = [...document.querySelectorAll("[data-feature-slide]")];
+  const current = slides.findIndex((slide) => !slide.hidden);
+  const index = choice === "next"
+    ? (current + 1) % slides.length
+    : choice === "previous"
+    ? (current + slides.length - 1) % slides.length
+    : Number(choice);
+  slides.forEach((slide, i) => {
+    slide.hidden = i !== index;
+  });
+  document.querySelectorAll(".feature-dots button").forEach((button, i) => {
+    button.setAttribute("aria-current", String(i === index));
+  });
+}
 function loginScreen() {
   $("#app").innerHTML =
-    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p><div class="mini-card"><span class="eyebrow">My wish list · サンプル</span><strong>¥69,760 <small class="delta">↘ ¥4,820</small></strong><svg viewBox="0 0 420 70" aria-label="サンプルの総額推移"><path d="M0 6 55 12 110 7 165 26 220 25 275 44 330 40 385 62 420 62" stroke="#17665a" stroke-width="2.5" fill="none"/><path d="M0 6 55 12 110 7 165 26 220 25 275 44 330 40 385 62 420 62 V70 H0" fill="#17665a09"/></svg><div class="mini-caption"><span>2週間前</span><span>今日</span></div></div></div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
+    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
 }
 function shell() {
   const tabs = [["compare", "▦", "価格比較"], ["history", "⌁", "総額の推移"], [
@@ -1203,6 +1272,10 @@ async function action(name) {
 document.addEventListener("click", (event) => {
   const target = event.target.closest("button,[data-close],a[data-tab]");
   if (!target) return;
+  if (target.dataset.feature !== undefined) {
+    showFeature(target.dataset.feature);
+    return;
+  }
   if (target.hasAttribute("data-close")) {
     $("#modal").close();
     return;
