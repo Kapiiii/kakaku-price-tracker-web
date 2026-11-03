@@ -506,9 +506,18 @@ function renderJob() {
     }</div>`
     : "";
 }
+const savedFormValues = new WeakMap();
+const settingsForm = () => $("#content form[data-settings], #content form[data-fallback-product]");
+const formValues = (form) => JSON.stringify([...new FormData(form)]);
+function unsavedSettingsForm() {
+  const form = settingsForm();
+  return form && savedFormValues.get(form) !== formValues(form) ? form : null;
+}
 function renderContent() {
   if (!state) return;
   ({ compare: renderCompare, history: renderHistory, product: renderProduct, manage: renderManage })[tab]();
+  const form = settingsForm();
+  if (form) savedFormValues.set(form, formValues(form));
 }
 function pointLabel() {
   return pastId === INITIAL_POINT
@@ -933,6 +942,35 @@ function modal(content, className = "") {
   node.className = className;
   node.innerHTML = content;
   if (!node.open) node.showModal();
+}
+function navigateTab(nextTab, destination) {
+  if (nextTab === tab && !destination) return;
+  const navigate = () => {
+    tab = nextTab;
+    shell();
+    if (destination === "#product-fallback-settings") {
+      const heading = $(destination);
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView({ block: "center" });
+    }
+  };
+  const form = unsavedSettingsForm();
+  if (!form || nextTab === tab) {
+    navigate();
+    return;
+  }
+  modal(
+    '<h2>未保存の変更があります</h2><p>別のタブへ移る前に、変更を保存しますか？</p><div class="actions"><button type="button" data-close autofocus>移動をキャンセル</button><button type="button" data-discard-navigation>変更を破棄して移動</button><button type="button" class="primary" data-save-navigation>保存して移動</button></div>',
+  );
+  const currentEpoch = epoch;
+  $("[data-discard-navigation]").addEventListener("click", () => {
+    $("#modal").close();
+    navigate();
+  });
+  $("[data-save-navigation]").addEventListener("click", async () => {
+    $("#modal").close();
+    if (form.reportValidity() && await saveForm(form) && epoch === currentEpoch) navigate();
+  });
 }
 function showShare() {
   const products = visibleProducts().map((p) => ({ id: String(p.id), url: p.url, name: p.name }));
@@ -1361,13 +1399,7 @@ document.addEventListener("click", (event) => {
   if (target.dataset.tab) {
     const destination = target.hash;
     if (destination) event.preventDefault();
-    tab = target.dataset.tab;
-    shell();
-    if (destination === "#product-fallback-settings") {
-      const heading = $(destination);
-      heading?.focus({ preventScroll: true });
-      heading?.scrollIntoView({ block: "center" });
-    }
+    navigateTab(target.dataset.tab, destination);
     return;
   }
   if (target.dataset.product) {
@@ -1469,9 +1501,14 @@ document.addEventListener("change", (event) => {
     renderContent();
   }
 });
-document.addEventListener("submit", async (event) => {
+document.addEventListener("submit", (event) => {
   event.preventDefault();
-  const form = event.target, data = new FormData(form), button = form.querySelector('button[type="submit"]');
+  void saveForm(event.target);
+});
+async function saveForm(form) {
+  const button = form.querySelector('button[type="submit"]');
+  if (button?.disabled) return false;
+  const data = new FormData(form);
   if (button) button.disabled = true;
   try {
     if (form.hasAttribute("data-account-deletion")) {
@@ -1522,7 +1559,7 @@ document.addEventListener("submit", async (event) => {
       preserveScroll(renderContent);
       notify(`${product_ids.length}商品の代替条件を保存しました。次回の価格更新から適用します。`);
     } else if (form.hasAttribute("data-settings")) {
-      state.settings = {
+      const settings = {
         ...state.settings,
         interval: Number(data.get("interval")),
         max_shops: Number(data.get("max_shops")),
@@ -1530,8 +1567,10 @@ document.addEventListener("submit", async (event) => {
         fallback_enabled: data.get("fallback_enabled") === "on",
         daily_hour: Number(data.get("daily_hour")),
       };
-      queuePrefs();
       await flushPrefs();
+      if (!demo) await api("preferences", { settings });
+      state.settings = settings;
+      viewRevision++;
       notify("取得設定を保存しました。");
       shell();
     } else if (form.hasAttribute("data-add")) {
@@ -1586,12 +1625,14 @@ document.addEventListener("submit", async (event) => {
       shell();
       notify("保存HTMLから価格を登録しました。");
     }
+    return true;
   } catch (e) {
     notify(e.message, true);
+    return false;
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
-});
+}
 $("#modal").addEventListener("click", (e) => {
   if (e.target === $("#modal")) {
     const r = e.target.getBoundingClientRect();
@@ -1653,7 +1694,7 @@ sb.auth.onAuthStateChange((_event, session) => {
 setInterval(async () => {
   if (
     !user || demo || !state || processing || polling || document.hidden || tab === "manage" ||
-    $("#modal").open || prefsPending || prefsInFlight
+    $("#modal").open || prefsPending || prefsInFlight || unsavedSettingsForm()
   ) return;
   polling = true;
   const revision = viewRevision,
@@ -1663,10 +1704,12 @@ setInterval(async () => {
     previousSnapshot = state.snapshots.at(-1)?.id;
   try {
     const status = await api("status");
-    if (revision !== viewRevision || processing || job?.id !== previousJobID) return;
+    if (revision !== viewRevision || processing || job?.id !== previousJobID || unsavedSettingsForm()) return;
     if (status.version !== knownVersion) {
       const result = await api("get");
-      if (revision !== viewRevision || processing || job?.id !== previousJobID) return;
+      if (revision !== viewRevision || processing || job?.id !== previousJobID || unsavedSettingsForm()) {
+        return;
+      }
       adopt(result.state);
       knownVersion = result.version;
       job = result.job;
