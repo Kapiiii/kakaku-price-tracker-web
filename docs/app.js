@@ -1,7 +1,7 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
-import { categoryURL, priceBasis, productFallbackURL, RTX5080_URL } from "./fallback.js?v=broader-fallback";
+import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=broader-fallback";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -130,9 +130,7 @@ function alternative(offer) {
     : "";
 }
 function fallbackSettings(product) {
-  const mode = product.fallback_mode === "custom"
-    ? (product.fallback_url === RTX5080_URL ? "rtx5080" : "custom")
-    : product.fallback_mode ?? "auto";
+  const mode = product.fallback_mode ?? "auto";
   const enabled = state.settings.fallback_enabled !== false;
   const searchURL = enabled ? productFallbackURL(product) : null;
   const condition = !enabled
@@ -145,7 +143,7 @@ function fallbackSettings(product) {
   return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
   }"><h3>代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
-    [["auto", "自動判定（商品仕様から）"], ["rtx5080", "RTX 5080搭載モデル（メーカー問わず）"], [
+    [["auto", "自動判定（商品仕様から）"], [
       "custom",
       "絞り込み一覧を指定",
     ], ["off", "代替価格を使わない"]].map(([value, label]) =>
@@ -1328,11 +1326,8 @@ document.addEventListener("submit", async (event) => {
           : "グループを保存しました。",
       );
     } else if (form.hasAttribute("data-fallback-product")) {
-      const selected = String(data.get("mode"));
-      const mode = selected === "rtx5080" ? "custom" : selected;
-      const url = mode === "custom"
-        ? categoryURL(selected === "rtx5080" ? RTX5080_URL : data.get("fallback_url"))
-        : null;
+      const mode = String(data.get("mode"));
+      const url = mode === "custom" ? categoryURL(data.get("fallback_url")) : null;
       await flushPrefs();
       if (demo) {
         const product = state.products.find((p) => p.id === form.dataset.fallbackProduct);
