@@ -30,7 +30,7 @@ import {
   shopList,
   summary,
   yen,
-} from "./core.js";
+} from "./core.js?v=group-delete";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -283,7 +283,11 @@ function shell() {
       job ? "disabled" : ""
     }>＋ グループを作成</button>${
       groupID !== ALL_GROUPS && groupID !== DEFAULT_GROUP
-        ? `<button data-action="group-rename" ${job ? "disabled" : ""}>名前を変更</button>`
+        ? `<button data-action="group-rename" ${
+          job ? "disabled" : ""
+        }>名前を変更</button><button class="danger" data-action="group-delete" ${
+          job ? "disabled" : ""
+        }>グループを削除</button>`
         : ""
     }</div></section><div id="job"></div><section class="page-heading"><div><span class="eyebrow">${
       tab === "history" ? "Basket timeline" : "My price journal"
@@ -858,6 +862,18 @@ async function runJob() {
   }
 }
 async function action(name) {
+  if (name === "group-delete") {
+    const group = state.groups?.find((g) => g.id === groupID);
+    if (job || !group) return;
+    modal(
+      `<h2>グループを削除しますか？</h2><p>「${
+        esc(group.name)
+      }」を削除します。グループ内の商品と価格履歴は「未分類」に移ります。</p><form data-group-edit="delete" data-group-id="${
+        esc(group.id)
+      }"><div class="actions"><button type="button" data-close autofocus>キャンセル</button><button type="submit" class="danger">削除する</button></div></form>`,
+    );
+    return;
+  }
   if (name === "group-create" || name === "group-rename" || name === "group-move") {
     const operation = name.slice("group-".length), group = productGroups(state).find((g) => g.id === groupID);
     const product = visibleProducts().find((p) => p.id === selectedProduct);
@@ -1244,7 +1260,13 @@ document.addEventListener("submit", async (event) => {
       adopt(result.state);
       $("#modal").close();
       shell();
-      notify(operation === "move" ? "商品を移動しました。" : "グループを保存しました。");
+      notify(
+        operation === "delete"
+          ? "グループを削除しました。商品は「未分類」で確認できます。"
+          : operation === "move"
+          ? "商品を移動しました。"
+          : "グループを保存しました。",
+      );
     } else if (form.hasAttribute("data-fallback-product")) {
       const selected = String(data.get("mode"));
       const mode = selected === "rtx5080" ? "custom" : selected;

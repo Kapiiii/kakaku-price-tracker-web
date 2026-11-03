@@ -49,6 +49,15 @@ export function editGroups(state, { operation, name, group_id, product_id }) {
     product.group_id = requireGroup(state, group_id);
     return group_id;
   }
+  if (operation === "delete") {
+    const groups = state.groups ?? [];
+    if (!groups.some((g) => g.id === group_id)) throw new Error("削除するグループが見つかりません。");
+    state.groups = groups.filter((g) => g.id !== group_id);
+    for (const product of state.products) {
+      if (product.group_id === group_id) product.group_id = DEFAULT_GROUP;
+    }
+    return DEFAULT_GROUP;
+  }
   if (operation !== "create" && operation !== "rename") throw new Error("操作を確認してください。");
   const label = groupName(name);
   if (
@@ -239,7 +248,10 @@ export function applyResults(input, results, kind = "update", started = nowISO()
       state.products.push(product);
     }
     if ((fresh || product.archived_at) && result.group_id !== undefined) {
-      product.group_id = requireGroup(state, result.group_id);
+      // 登録開始の直前に別の画面で追加先が削除された場合も、商品は保存する。
+      product.group_id = productGroups(state).some((g) => g.id === result.group_id)
+        ? result.group_id
+        : DEFAULT_GROUP;
     }
     product.archived_at = null;
     if (result.metadata) {

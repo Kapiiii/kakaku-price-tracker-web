@@ -43,6 +43,27 @@ Deno.test("groups scope totals and history, and product moves preserve the origi
   equal(basketHistory(groupView(state, group_id)).map((r) => r.value), [1000, 3000]);
   equal(comparison(groupView(state, "ungrouped")), []);
 });
+Deno.test("group deletion returns active and archived products to ungrouped with their history", () => {
+  let state = emptyState();
+  const group_id = editGroups(state, { operation: "create", name: "家電" });
+  const other = "https://kakaku.com/item/K0000000002/";
+  state = applyResults(
+    state,
+    [{ url, data: data(), group_id }, { url: other, data: data(), group_id }],
+    "add",
+  );
+  state = archiveProducts(state, [state.products[1].id]);
+  const before = clone(state);
+  equal(editGroups(state, { operation: "delete", group_id }), "ungrouped");
+  equal(state.groups, []);
+  equal(state.products.map((p) => p.group_id), ["ungrouped", "ungrouped"]);
+  equal(state.captures, before.captures);
+  equal(state.snapshots, before.snapshots);
+  equal(comparison(groupView(state, "ungrouped"))[0].current, 1000);
+  equal(importBackup({ format_version: "cloud-1", data: state }).groups, []);
+  throws(() => editGroups(state, { operation: "delete", group_id: "ungrouped" }));
+  throws(() => editGroups(state, { operation: "delete", group_id: "all" }));
+});
 Deno.test("four basket totals, dynamic exclusions and comparable differences", () => {
   const state = makeDemo();
   state.excluded = ["demo:0"];
