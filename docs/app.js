@@ -142,7 +142,7 @@ function fallbackSettings(product) {
     : "自動検索に使える条件はまだありません。次回の商品取得時に判定します。";
   return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
-  }"><h3>代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
+  }"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
     [["auto", "自動判定（商品仕様から）"], [
       "custom",
       "絞り込み一覧を指定",
@@ -793,7 +793,11 @@ function renderManage() {
         }:00</option>`).join("")
     }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="row"><input type="checkbox" name="fallback_enabled" ${
       state.settings.fallback_enabled !== false ? "checked" : ""
-    }>代替参考価格を使う</label><p class="help">OFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
+    }>代替参考価格を使う</label><p class="help">OFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help">商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。${
+      visibleProducts().length
+        ? ' <a href="#product-fallback-settings" data-tab="product">商品ごとの代替条件を開く ↓</a>'
+        : ""
+    }</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
     }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
@@ -1194,15 +1198,22 @@ async function action(name) {
   }
 }
 document.addEventListener("click", (event) => {
-  const target = event.target.closest("button,[data-close]");
+  const target = event.target.closest("button,[data-close],a[data-tab]");
   if (!target) return;
   if (target.hasAttribute("data-close")) {
     $("#modal").close();
     return;
   }
   if (target.dataset.tab) {
+    const destination = target.hash;
+    if (destination) event.preventDefault();
     tab = target.dataset.tab;
     shell();
+    if (destination === "#product-fallback-settings") {
+      const heading = $(destination);
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView({ block: "center" });
+    }
     return;
   }
   if (target.dataset.product) {
