@@ -1,5 +1,5 @@
 import { createClient } from "./vendor/supabase.js";
-import { CONFIG } from "./config.js";
+import { CONFIG } from "./config.js?v=accounts";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
 import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=broader-fallback";
 import {
@@ -346,9 +346,57 @@ function showFeature(choice) {
   const progress = $(".feature-progress span");
   progress?.replaceWith(progress.cloneNode());
 }
+async function authProviders() {
+  const response = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
+    headers: { apikey: CONFIG.publishableKey },
+  });
+  if (!response.ok) throw new Error("ログイン方法を読み込めませんでした。");
+  return (await response.json()).external ?? {};
+}
+function showEmailForm(mode) {
+  const title = {
+    signin: "PRICE NOTEアカウントでログイン",
+    signup: "PRICE NOTEアカウントを作成",
+    forgot: "パスワードを再設定",
+    recovery: "新しいパスワードを設定",
+  }[mode];
+  modal(`<h2>${title}</h2><form data-email-auth="${mode}">
+    ${
+    mode === "recovery"
+      ? ""
+      : '<label class="field">メールアドレス<input name="email" type="email" autocomplete="email" required></label>'
+  }
+    ${
+    mode === "forgot"
+      ? ""
+      : `<label class="field">パスワード<input name="password" type="password" autocomplete="${
+        mode === "signin" ? "current-password" : "new-password"
+      }" ${mode === "signin" ? "" : 'minlength="8"'} required></label>`
+  }
+    ${
+    mode === "signin"
+      ? '<div class="row"><button type="button" class="ghost" data-action="email-signup">アカウントを作成</button><button type="button" class="ghost" data-action="email-forgot">パスワードを忘れた場合</button></div>'
+      : ""
+  }
+    ${
+    mode === "signup"
+      ? '<p class="help">8文字以上のパスワードを入力してください。確認メールのリンクを、このブラウザーで開くと登録が完了します。</p>'
+      : ""
+  }
+    ${mode === "forgot" ? '<p class="help">再設定メールのリンクを、このブラウザーで開いてください。</p>' : ""}
+    <p class="help" role="status" data-auth-message></p><div class="actions"><button type="button" data-close>閉じる</button><button type="submit" class="primary">${
+    mode === "signin" ? "ログイン" : mode === "recovery" ? "保存" : "メールを送信"
+  }</button></div></form>`);
+}
 function loginScreen() {
   $("#app").innerHTML =
-    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
+    `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="login-google" hidden>Googleでログイン</button><button data-action="email-signin" hidden>メールアドレスでログイン・新規登録</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
+  const login = $(".login");
+  authProviders().then((providers) => {
+    login.querySelector('[data-action="login-google"]').hidden = !providers.google;
+    login.querySelector('[data-action="email-signin"]').hidden = !CONFIG.emailAccountsEnabled ||
+      !providers.email;
+  }).catch(() => {});
   $(".feature-carousel").addEventListener("animationend", (event) => {
     if (event.animationName === "feature-countdown") showFeature("next");
   });
@@ -865,6 +913,15 @@ function renderProduct() {
       productSelect(products, "fallback", "代替条件を設定する商品")
     }${fallbackSettings(p)}</div></section>`;
 }
+function showDeletionStatus(panel, status) {
+  panel.innerHTML = status.delete_at
+    ? `<p><strong>削除予定：${
+      esc(dateLabel(status.delete_at))
+    }（日本時間）</strong></p><p class="help">削除までは引き続き利用できます。予定時刻を過ぎると、登録商品・価格履歴・設定が削除されます。</p>${
+      status.can_cancel ? '<button data-action="cancel-account-deletion">削除予約を取り消す</button>' : ""
+    }`
+    : '<p class="help">削除を予約すると30日後にPRICE NOTEのアカウント、商品、価格履歴、設定が削除されます。予定時刻までは予約を取り消せます。</p><button class="danger" data-action="schedule-account-deletion">アカウントの削除を予約</button>';
+}
 function renderManage() {
   $("#content").innerHTML =
     `<div class="details-grid"><section class="panel"><div class="panel-header"><h2>価格の取得設定</h2></div><div class="panel-body"><form data-settings><label class="row"><input type="checkbox" name="daily_enabled" ${
@@ -897,6 +954,20 @@ function renderManage() {
       job || !visibleProducts().length ? "disabled" : ""
     }>選択した商品を削除</button></form></div></section></div><p class="help section-space">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
+  if (!demo) {
+    $("#content .details-grid").insertAdjacentHTML(
+      "beforeend",
+      '<section class="panel"><div class="panel-header"><h2>アカウント</h2></div><div class="panel-body" id="account-deletion"><p class="help">削除予約の状態を読み込んでいます…</p></div></section>',
+    );
+    const panel = $("#account-deletion");
+    api("account-deletion", { operation: "status" }).then((status) => {
+      if (panel.isConnected) showDeletionStatus(panel, status);
+    }).catch(() => {
+      if (panel.isConnected) {
+        panel.textContent = "削除予約の状態を読み込めませんでした。画面を開き直してください。";
+      }
+    });
+  }
 }
 function modal(content, className = "") {
   const node = $("#modal");
@@ -1005,6 +1076,24 @@ async function runJob() {
   }
 }
 async function action(name) {
+  if (["email-signin", "email-signup", "email-forgot"].includes(name) && CONFIG.emailAccountsEnabled) {
+    showEmailForm(name.slice("email-".length));
+    return;
+  }
+  if (name === "schedule-account-deletion") {
+    modal(
+      '<h2>アカウントの削除を予約しますか？</h2><p>30日後にPRICE NOTEのアカウントと、登録商品・価格履歴・設定を削除します。GitHubなど、ログインに使った外部サービスのアカウントには影響しません。</p><form data-account-deletion><label class="row"><input type="checkbox" name="confirm" required>30日後に削除されることを確認しました</label><div class="actions"><button type="button" data-close autofocus>キャンセル</button><button class="danger" type="submit">削除を予約する</button></div></form>',
+    );
+    return;
+  }
+  if (name === "cancel-account-deletion") {
+    const status = await api("account-deletion", { operation: "cancel" });
+    const panel = $("#account-deletion");
+    if (panel) showDeletionStatus(panel, status);
+    if (status.delete_at) throw new Error("削除予定時刻を過ぎたため、取り消せません。");
+    notify("アカウントの削除予約を取り消しました。");
+    return;
+  }
   if (name === "group-delete") {
     const group = state.groups?.find((g) => g.id === groupID);
     if (job || !group) return;
@@ -1066,17 +1155,15 @@ async function action(name) {
     );
     return;
   }
-  if (name === "login") {
-    const settings = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
-      headers: { apikey: CONFIG.publishableKey },
-    }).then((r) => r.json());
-    if (!settings.external?.github) {
+  if (name === "login" || name === "login-google") {
+    const provider = name === "login-google" ? "google" : "github";
+    if (!(await authProviders())[provider]) {
       throw new Error(
-        "GitHubログインの初期設定がまだ完了していません。管理者がREADMEのログイン設定を行うと利用できます。デモは今すぐ確認できます。",
+        "このログイン方法はまだ利用できません。デモは今すぐ確認できます。",
       );
     }
     const { error } = await sb.auth.signInWithOAuth({
-      provider: "github",
+      provider,
       options: { redirectTo: CONFIG.siteUrl },
     });
     if (error) throw error;
@@ -1414,7 +1501,39 @@ document.addEventListener("submit", async (event) => {
   const form = event.target, data = new FormData(form), button = form.querySelector('button[type="submit"]');
   if (button) button.disabled = true;
   try {
-    if (form.hasAttribute("data-group-edit")) {
+    if (form.hasAttribute("data-account-deletion")) {
+      if (data.get("confirm") !== "on") throw new Error("確認欄にチェックを入れてください。");
+      const status = await api("account-deletion", { operation: "schedule", confirm: true });
+      $("#modal").close();
+      const panel = $("#account-deletion");
+      if (panel) showDeletionStatus(panel, status);
+      notify("アカウントの削除を予約しました。");
+    } else if (form.hasAttribute("data-email-auth") && CONFIG.emailAccountsEnabled) {
+      const mode = form.dataset.emailAuth, email = String(data.get("email") ?? "").trim();
+      const password = String(data.get("password") ?? "");
+      const message = form.querySelector("[data-auth-message]");
+      const { error } = mode === "signin"
+        ? await sb.auth.signInWithPassword({ email, password })
+        : mode === "signup"
+        ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: CONFIG.siteUrl } })
+        : mode === "forgot"
+        ? await sb.auth.resetPasswordForEmail(email, { redirectTo: CONFIG.siteUrl })
+        : await sb.auth.updateUser({ password });
+      if (error) {
+        message.textContent = mode === "signin"
+          ? "ログインできませんでした。入力内容と確認メールをご確認ください。"
+          : "操作を完了できませんでした。入力内容を確認し、時間をおいてお試しください。";
+        return;
+      }
+      if (mode === "signin" || mode === "recovery") {
+        if (form.isConnected) $("#modal").close();
+        if (mode === "recovery") notify("パスワードを更新しました。");
+      } else {
+        message.textContent = mode === "signup"
+          ? "登録できるアドレスには、確認メールが届きます。"
+          : "登録済みのアドレスには、再設定メールが届きます。";
+      }
+    } else if (form.hasAttribute("data-group-edit")) {
       const operation = form.dataset.groupEdit;
       const values = {
         operation,
@@ -1572,9 +1691,16 @@ async function authChange(session) {
     }
   }
 }
-sb.auth.onAuthStateChange((_event, session) => {
-  setTimeout(() => {
-    authChange(session).catch((e) => notify(e.message, true));
+sb.auth.onAuthStateChange((event, session) => {
+  setTimeout(async () => {
+    try {
+      await authChange(session);
+      if (event === "PASSWORD_RECOVERY" && CONFIG.emailAccountsEnabled && user?.id === session?.user.id) {
+        showEmailForm("recovery");
+      }
+    } catch (e) {
+      notify(e.message, true);
+    }
   }, 0);
 });
 // 開いている画面にも自動更新の進捗・完了を反映する。入力中の設定画面は再描画しない。

@@ -106,6 +106,12 @@ export async function dispatch(
         quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
       };
     }
+    case "account-deletion": {
+      const operation = body.operation;
+      if (!["status", "schedule", "cancel"].includes(operation)) throw new Error("操作を確認してください。");
+      if (operation === "schedule" && body.confirm !== true) throw new Error("削除予約の確認が必要です。");
+      return await rpc(admin, "tracker_account_deletion", { p_owner: owner, p_action: operation });
+    }
     case "quota": {
       return { quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }) };
     }
