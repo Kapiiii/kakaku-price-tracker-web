@@ -198,7 +198,7 @@ hr {
 .login {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 1.05fr 1fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
 }
 .login-story {
   background: #e8f0e9;
@@ -277,13 +277,23 @@ hr {
   font-size: 11px;
   margin: 0 3px 12px;
 }
+.feature-stage {
+  display: grid;
+}
 .feature-slide {
+  grid-area: 1 / 1;
+  min-width: 0;
   min-height: 235px;
   border: 1px solid #d7e3d8;
   border-radius: 15px;
   background: #fff;
   padding: 18px;
   animation: feature-in .24s ease-out;
+}
+.feature-slide[hidden] {
+  display: block;
+  visibility: hidden;
+  animation: none;
 }
 .feature-slide h2 {
   font-size: clamp(18px, 2vw, 23px);
@@ -374,6 +384,47 @@ hr {
   background: #eaddba;
   border-radius: 4px;
   padding: 0 5px;
+}
+.feature-timing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.feature-progress {
+  flex: 1;
+  overflow: hidden;
+  height: 5px;
+  border-radius: 8px;
+  background: #d4e1d7;
+}
+.feature-progress span {
+  display: block;
+  height: 100%;
+  background: #17665a;
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: feature-countdown 6s linear both;
+}
+@keyframes feature-countdown {
+  to {
+    transform: scaleX(1);
+  }
+}
+.feature-carousel[data-feature-paused] .feature-progress span,
+.feature-carousel:has([data-feature]:focus-visible) .feature-progress span {
+  animation-play-state: paused;
+}
+@media (hover: hover) {
+  .feature-carousel:hover .feature-progress span {
+    animation-play-state: paused;
+  }
+}
+.feature-timing button {
+  min-width: 75px;
+  padding: 6px 9px;
+  font-size: 11px;
+  color: #185747;
 }
 .feature-controls {
   display: flex;

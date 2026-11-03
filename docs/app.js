@@ -300,9 +300,12 @@ const loginFeatures = [
   },
 ];
 function featureCarousel() {
-  return `<section class="feature-carousel" aria-label="PRICE NOTEの機能紹介" aria-roledescription="カルーセル">
+  const paused = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return `<section class="feature-carousel" ${
+    paused ? "data-feature-paused" : ""
+  } aria-label="PRICE NOTEの機能紹介" aria-roledescription="カルーセル">
     <div class="feature-carousel-header"><span class="eyebrow">FEATURE TOUR</span><span>機能紹介 · 表示はサンプル</span></div>
-    <div aria-live="polite">${
+    <div class="feature-stage" aria-live="${paused ? "polite" : "off"}">${
     loginFeatures.map((feature, index) =>
       `<article class="feature-slide" data-feature-slide ${index ? "hidden" : ""}>
         <span class="eyebrow">${feature.tag}</span><h2>${feature.title}</h2><p>${feature.description}</p>
@@ -310,6 +313,9 @@ function featureCarousel() {
       </article>`
     ).join("")
   }</div>
+    <div class="feature-timing"><div class="feature-progress" aria-hidden="true"><span></span></div>
+      <button type="button" data-feature-playback>${paused ? "自動再生" : "一時停止"}</button>
+    </div>
     <div class="feature-controls">
       <button type="button" data-feature="previous" aria-label="前の機能">←</button>
       <div class="feature-dots" role="group" aria-label="紹介する機能を選ぶ">${
@@ -337,10 +343,15 @@ function showFeature(choice) {
   document.querySelectorAll(".feature-dots button").forEach((button, i) => {
     button.setAttribute("aria-current", String(i === index));
   });
+  const progress = $(".feature-progress span");
+  progress?.replaceWith(progress.cloneNode());
 }
 function loginScreen() {
   $("#app").innerHTML =
     `<main class="login"><section class="login-story">${brand}<div><span class="eyebrow">Your personal price journal</span><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><span class="eyebrow">Welcome to Price Note</span><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
+  $(".feature-carousel").addEventListener("animationend", (event) => {
+    if (event.animationName === "feature-countdown") showFeature("next");
+  });
 }
 function shell() {
   const tabs = [["compare", "▦", "価格比較"], ["history", "⌁", "総額の推移"], [
@@ -1272,6 +1283,13 @@ async function action(name) {
 document.addEventListener("click", (event) => {
   const target = event.target.closest("button,[data-close],a[data-tab]");
   if (!target) return;
+  if (target.hasAttribute("data-feature-playback")) {
+    const carousel = target.closest(".feature-carousel");
+    const paused = carousel.toggleAttribute("data-feature-paused");
+    target.textContent = paused ? "自動再生" : "一時停止";
+    carousel.querySelector(".feature-stage").setAttribute("aria-live", paused ? "polite" : "off");
+    return;
+  }
   if (target.dataset.feature !== undefined) {
     showFeature(target.dataset.feature);
     return;
