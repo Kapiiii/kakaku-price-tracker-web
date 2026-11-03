@@ -1406,6 +1406,7 @@ document.addEventListener("click", (event) => {
     selectedProduct = target.dataset.product;
     tab = "product";
     shell();
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     return;
   }
   if (target.dataset.snapshot) {
