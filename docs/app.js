@@ -184,6 +184,24 @@ async function api(action, values = {}) {
   if (result.quota) setManualQuota(result.quota);
   return result;
 }
+function groupStorageKey() {
+  return `price-note:display-group:${demo ? "demo" : user.id}`;
+}
+function savedGroup() {
+  try {
+    return localStorage.getItem(groupStorageKey()) || ALL_GROUPS;
+  } catch {
+    return ALL_GROUPS;
+  }
+}
+function selectGroup(id) {
+  groupID = id;
+  try {
+    localStorage.setItem(groupStorageKey(), id);
+  } catch {
+    // 保存できないブラウザーでも、現在の画面では切り替えられる。
+  }
+}
 function visibleProducts() {
   return activeProducts(state).filter((p) =>
     groupID === ALL_GROUPS || (p.group_id ?? DEFAULT_GROUP) === groupID
@@ -214,7 +232,9 @@ function adopt(next) {
   }
   state = next;
   pastId = comparisonPoint(state);
-  if (groupID !== ALL_GROUPS && !productGroups(state).some((g) => g.id === groupID)) groupID = ALL_GROUPS;
+  if (groupID !== ALL_GROUPS && !productGroups(state).some((g) => g.id === groupID)) {
+    selectGroup(ALL_GROUPS);
+  }
   ensureSelectedProduct();
 }
 function queuePrefs() {
@@ -946,7 +966,7 @@ async function action(name) {
     processing = false;
     manualQuota = { used: 0, remaining: 2, limit: 2 };
     refreshStarting = false;
-    groupID = ALL_GROUPS;
+    groupID = savedGroup();
     adopt(makeDemo());
     shell();
     return;
@@ -1213,7 +1233,7 @@ document.addEventListener("change", (event) => {
     refreshExcluded();
   }
   if (node.hasAttribute("data-group")) {
-    groupID = node.value;
+    selectGroup(node.value);
     viewRevision++;
     ensureSelectedProduct();
     preserveScroll(shell);
@@ -1256,7 +1276,7 @@ document.addEventListener("submit", async (event) => {
       await flushPrefs();
       const next = demo ? clone(state) : null;
       const result = demo ? { state: next, group_id: editGroups(next, values) } : await api("groups", values);
-      groupID = result.group_id;
+      selectGroup(result.group_id);
       adopt(result.state);
       $("#modal").close();
       shell();
@@ -1302,7 +1322,7 @@ document.addEventListener("submit", async (event) => {
       await flushPrefs();
       const group_id = String(data.get("group_id"));
       const result = await api("begin", { kind: "add", urls, group_id });
-      groupID = group_id;
+      selectGroup(group_id);
       ensureSelectedProduct();
       job = result.job;
       $("#modal").close();
@@ -1392,6 +1412,7 @@ async function authChange(session) {
     const result = await api("get");
     if (currentEpoch !== epoch) return;
     knownVersion = result.version;
+    groupID = savedGroup();
     adopt(result.state);
     job = result.job;
     shell();
