@@ -655,8 +655,6 @@ th.numeric {
   max-width: 210px;
 }
 .fallback-settings {
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
   max-width: 740px;
 }
 .tag {

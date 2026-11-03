@@ -1,7 +1,7 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
-import { categoryURL, productFallbackURL, RTX5080_URL } from "./fallback.js?v=broader-fallback";
+import { categoryURL, priceBasis, productFallbackURL, RTX5080_URL } from "./fallback.js?v=broader-fallback";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -22,7 +22,6 @@ import {
   groupView,
   importBackup,
   INITIAL_POINT,
-  itemMap,
   makeDemo,
   minimum,
   priceView,
@@ -134,7 +133,16 @@ function fallbackSettings(product) {
   const mode = product.fallback_mode === "custom"
     ? (product.fallback_url === RTX5080_URL ? "rtx5080" : "custom")
     : product.fallback_mode ?? "auto";
-  return `<form class="fallback-settings section-space" data-fallback-product="${
+  const enabled = state.settings.fallback_enabled !== false;
+  const searchURL = enabled ? productFallbackURL(product) : null;
+  const condition = !enabled
+    ? "全体設定でOFFです。再開するには「設定・データ」で「代替参考価格を使う」をONにしてください。"
+    : mode === "off"
+    ? "この商品は代替候補を検索しません。"
+    : searchURL
+    ? `<a href="${esc(searchURL)}" target="_blank" rel="noopener noreferrer">保存済みの候補一覧を開く ↗</a>`
+    : "自動検索に使える条件はまだありません。次回の商品取得時に判定します。";
+  return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
   }"><h3>代替価格の条件</h3><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p><label class="field">代替候補<select name="mode" data-fallback-mode>${
     [["auto", "自動判定（商品仕様から）"], ["rtx5080", "RTX 5080搭載モデル（メーカー問わず）"], [
@@ -143,19 +151,15 @@ function fallbackSettings(product) {
     ], ["off", "代替価格を使わない"]].map(([value, label]) =>
       `<option value="${value}" ${value === mode ? "selected" : ""}>${label}</option>`
     ).join("")
-  }</select></label><label class="field">条件を絞った製品一覧のURL<input name="fallback_url" type="url" value="${
+  }</select></label><div data-fallback-url ${
+    mode === "custom" ? "" : "hidden"
+  }><label class="field">条件を絞った製品一覧のURL<input name="fallback_url" type="url" value="${
     esc(product.fallback_url ?? "")
   }" ${
     mode === "custom" ? "required" : "disabled"
-  } placeholder="https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499"></label><p class="help">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
+  } placeholder="https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499"></label></div><p class="help">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
     job ? "disabled" : ""
-  }>代替条件を保存</button><p class="help">現在の検索条件：${
-    productFallbackURL(product)
-      ? `<a href="${
-        esc(productFallbackURL(product))
-      }" target="_blank" rel="noopener noreferrer">候補一覧を開く ↗</a>`
-      : "未指定・自動判定待ち"
-  }</p></form>`;
+  }>代替条件を保存</button><p class="help">現在の設定：${condition}</p></form>`;
 }
 async function api(action, values = {}) {
   const requestEpoch = epoch, owner = user?.id;
@@ -376,8 +380,10 @@ function preserveScroll(render) {
 function refreshExcluded() {
   const focused = document.activeElement, focusedShop = focused?.dataset.shop;
   preserveScroll(() => {
-    // 一覧と設定フォームを残し、再計算が必要な価格表示だけを更新する。
+    // 除外後の価格を描画し直しても、入力中の代替条件は保持する。
+    const fallbackForm = $("#content [data-fallback-product]");
     if (tab !== "manage") renderContent();
+    if (fallbackForm) $("#content [data-fallback-product]")?.replaceWith(fallbackForm);
     const excluded = new Set(state.excluded);
     for (const input of document.querySelectorAll("[data-shop]")) {
       input.checked = excluded.has(input.dataset.shop);
@@ -553,9 +559,11 @@ function historyRows() {
     +new Date(r.date) >= cutoff && (groupID === ALL_GROUPS || fixed || r.raw.count > 0)
   );
 }
-function chart(records) {
-  const rows = records.filter((r) => r.value !== null || r.filteredValue !== null);
-  if (!rows.length) return '<div class="empty"><p>価格を取得すると推移が表示されます。</p></div>';
+function chart(records, label = "保存時点ごとの総額推移") {
+  const rows = records;
+  if (!rows.some((r) => r.value !== null || r.filteredValue !== null)) {
+    return '<div class="empty"><p>価格を取得すると推移が表示されます。</p></div>';
+  }
   const width = 900,
     height = 250,
     left = 76,
@@ -575,8 +583,9 @@ function chart(records) {
         ? (width - left - right) / 2
         : (times[i] - start) / (end - start) * (width - left - right)),
     y = (v) => top + (high - v) / (high - low) * (height - top - bottom);
-  let svg =
-    `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="保存時点ごとの総額推移。詳細値は下の履歴表に表示しています。">`;
+  let svg = `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${
+    esc(label)
+  }。詳細値は下の履歴表に表示しています。">`;
   for (let n = 0; n < 4; n++) {
     const v = low + (high - low) * n / 3;
     svg += `<line class="axis" x1="${left}" x2="${width - right}" y1="${y(v)}" y2="${y(v)}"/><text x="${
@@ -601,12 +610,14 @@ function chart(records) {
       const xx = x(i), yy = y(r[key]);
       if (previous && r[segment] === previous.r[segment]) {
         svg += `<path class="${cls}" ${
-          r[summaryKey].total === null ? 'stroke-dasharray="5 5"' : ""
+          r.estimate || r[summaryKey].total === null ? 'stroke-dasharray="5 5"' : ""
         } d="M${previous.x},${previous.y} L${xx},${yy}"/>`;
       }
-      svg += `<circle cx="${xx}" cy="${yy}" r="3.5" fill="${color}" stroke="#fff" stroke-width="1.5"><title>${
-        esc(dateLabel(r.date))
-      }：${esc(yen(r[key]))}${r[summaryKey].total === null ? "（小計）" : ""}</title></circle>`;
+      svg += `<circle cx="${xx}" cy="${yy}" r="3.5" fill="${r.estimate ? "#fff" : color}" stroke="${
+        r.estimate ? color : "#fff"
+      }" stroke-width="1.5"><title>${esc(dateLabel(r.date))}：${esc(yen(r[key]))}${
+        r[summaryKey].total === null ? "（小計）" : ""
+      }${r.note ? `（${esc(r.note)}）` : ""}</title></circle>`;
       previous = { r, x: xx, y: yy };
     });
   }
@@ -669,6 +680,32 @@ function renderProduct() {
     return;
   }
   const captures = view.captures.filter((c) => c.product_id === p.id), capture = captures.at(-1);
+  const records = view.snapshots.flatMap((snapshot) => {
+    const item = snapshot.items.find((entry) => String(entry.product_id) === String(p.id));
+    if (!item) return [];
+    const saved = cm.get(String(item.capture_id));
+    const value = minimum(saved)?.price ?? null;
+    const filteredValue = minimum(saved, state.excluded)?.price ?? null;
+    const estimate = saved?.source === "fallback";
+    const carried = saved && ["carried", "error"].includes(item.status);
+    const note = [estimate ? "代替参考価格" : "", carried ? "前回価格の引継ぎ" : ""].filter(Boolean).join(
+      "・",
+    );
+    const basis = priceBasis(saved);
+    return [{
+      date: snapshot.completed_at,
+      item,
+      saved,
+      value,
+      filteredValue,
+      estimate,
+      note,
+      rawSegment: basis,
+      filteredSegment: basis,
+      raw: { total: value },
+      filtered: { total: filteredValue },
+    }];
+  });
   $("#content").innerHTML =
     `<section class="panel"><div class="panel-header"><div><h2>商品を選択</h2></div><select aria-label="履歴を見る商品" data-product-select>${
       products.map((q) =>
@@ -704,9 +741,9 @@ function renderProduct() {
           esc(capture.fallback.search_url)
         }" target="_blank" rel="noopener noreferrer">検索条件を開く ↗</a></div>`
         : ""
-    }${
-      fallbackSettings(p)
-    }</div></section><div class="details-grid"><section class="panel"><div class="panel-header"><h2>${
+    }</div></section><section class="panel section-space"><div class="panel-header"><div><h2>この商品の価格推移</h2><p>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
+      chart(records, "保存時点ごとの商品価格推移")
+    }<div class="legend"><span><i></i>最安価格</span><span><i class="gold"></i>ショップ除外後</span><span>白抜きの点・破線：代替参考価格</span></div></section><div class="details-grid"><section class="panel"><div class="panel-header"><h2>${
       capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
     }</h2><span class="count">${
       capture?.offers.length ?? 0
@@ -729,26 +766,23 @@ function renderProduct() {
         }</small></td></tr>`
       ).join("") || '<tr><td colspan="4">店舗別価格はまだありません。</td></tr>'
     }</tbody></table></div></section><section class="panel"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
-      [...view.snapshots].reverse().flatMap((s) => {
-        const item = itemMap(s).get(p.id);
-        if (!item) return [];
-        const c = cm.get(item.capture_id);
-        return [
-          `<tr><td><small>${esc(dateLabel(s.completed_at))}</small></td><td class="numeric">${
-            yen(minimum(c)?.price)
-          }</td><td class="numeric">${yen(minimum(c, state.excluded)?.price)}</td><td><span class="tag ${
-            item.status === "error" ? "warn" : ""
-          }">${
-            c?.source === "fallback" ? `代替参考価格${item.status === "error" ? "・前回" : ""}` : {
-              fresh: "取得",
-              carried: "引継ぎ",
-              missing: "未取得",
-              error: c ? "前回価格" : "未取得",
-            }[item.status]
-          }</span></td></tr>`,
-        ];
-      }).join("")
-    }</tbody></table></div></section></div>`;
+      [...records].reverse().map(({ date, item, saved: c, value, filteredValue }) =>
+        `<tr><td><small>${esc(dateLabel(date))}</small></td><td class="numeric">${
+          yen(value)
+        }</td><td class="numeric">${yen(filteredValue)}</td><td><span class="tag ${
+          item.status === "error" ? "warn" : ""
+        }">${
+          c?.source === "fallback" ? `代替参考価格${item.status === "error" ? "・前回" : ""}` : {
+            fresh: "取得",
+            carried: "引継ぎ",
+            missing: "未取得",
+            error: c ? "前回価格" : "未取得",
+          }[item.status]
+        }</span></td></tr>`
+      ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
+    }</tbody></table></div></section></div><section class="panel section-space"><div class="panel-body">${
+      fallbackSettings(p)
+    }</div></section>`;
 }
 function renderManage() {
   $("#content").innerHTML =
@@ -1210,9 +1244,11 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", (event) => {
   const node = event.target;
   if (node.hasAttribute("data-fallback-mode")) {
-    const input = node.closest("form").elements.fallback_url;
-    input.disabled = node.value !== "custom";
-    input.required = node.value === "custom";
+    const form = node.closest("form"), custom = node.value === "custom";
+    const input = form.elements.fallback_url;
+    form.querySelector("[data-fallback-url]").hidden = !custom;
+    input.disabled = !custom;
+    input.required = custom;
   }
   if (shareDraft && node.hasAttribute("data-share-product")) {
     node.checked
