@@ -39,7 +39,7 @@ button {
   border-radius: 9px;
   padding: 10px 15px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   transition: background .15s,transform .15s;
 }
 button:hover {
@@ -101,7 +101,7 @@ small,
   color: var(--muted);
 }
 small {
-  font-size: 11px;
+  font-size: 13px;
 }
 p {
   line-height: 1.8;
@@ -128,7 +128,7 @@ input[type=checkbox] {
   cursor: pointer;
 }
 label {
-  font-size: 13px;
+  font-size: 14px;
 }
 label.field {
   display: grid;
@@ -165,7 +165,7 @@ hr {
 .brand small {
   display: block;
   letter-spacing: 1px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   margin-top: 3px;
 }
@@ -209,7 +209,7 @@ hr {
   gap: 50px;
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 2px;
   color: var(--green);
   font-weight: 700;
@@ -227,7 +227,7 @@ hr {
   color: #5a7061;
 }
 .login-story footer {
-  font-size: 11px;
+  font-size: 13px;
   color: #779180;
 }
 .login-action {
@@ -246,7 +246,7 @@ hr {
   margin: 20px 0 10px;
 }
 .login-box p {
-  font-size: 13px;
+  font-size: 14px;
   color: #738078;
 }
 .login-box button {
@@ -255,7 +255,7 @@ hr {
   margin-top: 14px;
 }
 .login-box .fine {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.9;
   margin-top: 22px;
 }
@@ -274,7 +274,7 @@ hr {
   align-items: center;
   gap: 8px;
   color: #456252;
-  font-size: 11px;
+  font-size: 13px;
   margin: 0 3px 12px;
 }
 .feature-stage {
@@ -302,7 +302,7 @@ hr {
   color: #183e33;
 }
 .login-story .feature-slide p {
-  font-size: 13px;
+  font-size: 14px;
   margin: 0 0 14px;
 }
 @keyframes feature-in {
@@ -336,7 +336,7 @@ hr {
 .feature-preview small {
   display: block;
   color: #466257;
-  font-size: 10px;
+  font-size: 12px;
 }
 .feature-prices {
   display: grid;
@@ -364,14 +364,14 @@ hr {
 }
 .feature-trend span,
 .feature-alternative span {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
 }
 .feature-list div {
   display: flex;
   justify-content: space-between;
   padding: 3px 4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .feature-list div + div {
   border-top: 1px solid #ccded1;
@@ -423,7 +423,7 @@ hr {
 .feature-timing button {
   min-width: 75px;
   padding: 6px 9px;
-  font-size: 11px;
+  font-size: 13px;
   color: #185747;
 }
 .feature-controls {
@@ -497,7 +497,7 @@ hr {
   font-size: 14px;
 }
 .side-label {
-  font-size: 10px;
+  font-size: 12px;
   color: #8a958c;
   letter-spacing: 1.7px;
   margin-bottom: 12px;
@@ -530,19 +530,19 @@ hr {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 .count {
   background: #edf2ed;
   border-radius: 6px;
   padding: 3px 7px;
-  font-size: 10px;
+  font-size: 12px;
   color: #69806d;
 }
 .shop-search {
   width: 100%;
-  font-size: 11px;
+  font-size: 13px;
   margin-bottom: 12px;
 }
 .shop-list {
@@ -556,7 +556,7 @@ hr {
   align-items: center;
   gap: 7px;
   padding: 8px 1px;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
 }
 .shop-check span {
@@ -565,7 +565,7 @@ hr {
   white-space: nowrap;
 }
 .side-note {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.8;
   color: #8a958c;
   margin-top: 9px;
@@ -607,14 +607,14 @@ hr {
   gap: 12px;
 }
 .breadcrumb {
-  font-size: 11px;
+  font-size: 13px;
   color: #859086;
 }
 .account {
   display: flex;
   gap: 12px;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
 }
 .account img {
   width: 26px;
@@ -626,7 +626,7 @@ hr {
   color: #96712a;
   padding: 5px 9px;
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 .page-heading {
@@ -643,12 +643,12 @@ hr {
   gap: 9px;
 }
 .manual-quota {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 0;
 }
 .page-heading p {
-  font-size: 11px;
+  font-size: 14px;
   color: #839086;
   margin-top: 7px;
 }
@@ -676,7 +676,7 @@ hr {
   border-color: #17665a;
 }
 .metric .metric-label {
-  font-size: 11px;
+  font-size: 15px;
   color: #7a897e;
   display: flex;
   justify-content: space-between;
@@ -695,7 +695,7 @@ hr {
 .metric-point-select {
   width: 100%;
   min-width: 0;
-  font-size: 11px;
+  font-size: 13px;
   padding: 5px 20px 5px 7px;
   color: var(--green);
   background-color: #f6f8f5;
@@ -711,12 +711,12 @@ hr {
   font-variant-numeric: tabular-nums;
 }
 .metric-note {
-  font-size: 10px;
+  font-size: 12px;
   color: #8d9a90;
   line-height: 1.7;
 }
 .metric .sub {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--orange);
   background: #fff0d5;
   border-radius: 4px;
@@ -725,7 +725,7 @@ hr {
 }
 .delta {
   color: var(--green);
-  font-size: 11px;
+  font-size: 13px;
 }
 .delta.up {
   color: var(--orange);
@@ -753,7 +753,7 @@ hr {
   flex-wrap: wrap;
 }
 .panel-header p {
-  font-size: 10px;
+  font-size: 12px;
   color: #8a958d;
   margin-top: 6px;
 }
@@ -766,14 +766,14 @@ hr {
 table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 th {
   text-align: left;
   color: #8b968e;
   background: #fafcf9;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 14px 17px;
   border-bottom: 1px solid var(--line);
@@ -813,7 +813,7 @@ th.numeric {
   font-size: 20px;
 }
 .product-name {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   white-space: normal;
   line-height: 1.6;
@@ -821,7 +821,7 @@ th.numeric {
   text-decoration: none;
 }
 .product-sub {
-  font-size: 9px;
+  font-size: 11px;
   color: #97a297;
   margin-top: 5px;
 }
@@ -831,7 +831,7 @@ th.numeric {
   letter-spacing: -.3px;
 }
 .price-small {
-  font-size: 9px;
+  font-size: 11px;
   margin-top: 5px;
   color: #8b998c;
   max-width: 160px;
@@ -852,7 +852,7 @@ th.numeric {
   display: inline-block;
   border-radius: 4px;
   padding: 3px 6px;
-  font-size: 9px;
+  font-size: 11px;
   background: #eef4ef;
   color: #698675;
   margin-right: 4px;
@@ -862,7 +862,7 @@ th.numeric {
   color: #a27635;
 }
 .table-foot {
-  font-size: 10px;
+  font-size: 12px;
   color: #8a978c;
   padding: 14px 20px;
   background: #fcfdfb;
@@ -874,10 +874,10 @@ th.numeric {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: 13px;
 }
 .toolbar select {
-  font-size: 11px;
+  font-size: 13px;
   padding: 8px;
   max-width: 260px;
 }
@@ -896,7 +896,7 @@ th.numeric {
   margin-bottom: 10px;
 }
 .empty p {
-  font-size: 12px;
+  font-size: 14px;
   color: #8b998e;
   margin-bottom: 20px;
 }
@@ -906,7 +906,7 @@ th.numeric {
   border: 1px solid #d2e4d7;
   border-radius: 10px;
   margin: 20px 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .banner.warning {
@@ -935,7 +935,7 @@ th.numeric {
 }
 .chart text {
   fill: #97a396;
-  font-size: 10px;
+  font-size: 12px;
 }
 .chart .axis {
   stroke: #e7ece5;
@@ -957,9 +957,10 @@ th.numeric {
 }
 .legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: center;
-  font-size: 10px;
+  font-size: 12px;
   color: #7f8e81;
   padding: 0 22px 18px;
 }
@@ -984,7 +985,7 @@ th.numeric {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: white;
-  font-size: 11px;
+  font-size: 13px;
   color: #839081;
 }
 .history-stat strong {
@@ -1007,7 +1008,7 @@ th.numeric {
   text-decoration: line-through;
 }
 .help {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.9;
   color: #7f8e81;
   margin: 12px 0;
@@ -1016,7 +1017,7 @@ th.numeric {
   margin-top: 20px;
 }
 .footer {
-  font-size: 9px;
+  font-size: 11px;
   color: #98a397;
   display: flex;
   justify-content: space-between;
@@ -1032,7 +1033,7 @@ th.numeric {
   max-width: min(90vw,620px);
   background: #253f33;
   color: white;
-  font-size: 12px;
+  font-size: 14px;
   padding: 14px 22px;
   border-radius: 10px;
   box-shadow: 0 8px 30px #142d2a20;
@@ -1060,7 +1061,7 @@ dialog h2 {
   margin-bottom: 10px;
 }
 dialog p {
-  font-size: 12px;
+  font-size: 14px;
   color: #7f8e81;
 }
 dialog .actions {
@@ -1078,27 +1079,27 @@ dialog .actions {
   border-width: 0 0 1px;
   margin: 0 -36px;
   padding: 10px 36px;
-  font-size: 11px;
+  font-size: 13px;
   background: #fff8e8;
   border-color: #ece2c9;
   color: #927443;
 }
 .snapshot-meta {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.9;
   color: #8a958b;
 }
 .small-button {
-  font-size: 10px;
+  font-size: 12px;
   padding: 7px 10px;
 }
 details summary {
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.8;
 }
 .error-text {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--red);
   white-space: normal;
   line-height: 1.7;
@@ -1192,14 +1193,14 @@ details summary {
     gap: 14px;
   }
   .sidebar .brand {
-    font-size: 13px;
+    font-size: 14px;
   }
   .side-nav {
     grid-template-columns: repeat(4,1fr);
     gap: 5px;
   }
   .side-nav button {
-    font-size: 10px;
+    font-size: 12px;
     text-align: center;
     padding: 10px 3px;
   }
@@ -1226,15 +1227,24 @@ details summary {
     height: 58px;
   }
   .breadcrumb {
-    font-size: 10px;
+    font-size: 12px;
+    min-width: 0;
   }
   .account {
     gap: 6px;
-    font-size: 10px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .account > span {
+    max-width: 105px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .account button {
-    font-size: 10px;
+    font-size: 12px;
     padding: 8px;
+    white-space: nowrap;
   }
   .page-heading {
     margin: 24px 0 20px;
@@ -1255,7 +1265,7 @@ details summary {
     font-size: 25px;
   }
   .metric-label {
-    font-size: 10px!important;
+    font-size: 14px!important;
   }
   .panel-header {
     padding: 17px;
@@ -1274,7 +1284,7 @@ details summary {
   }
   .history-stat {
     padding: 13px 10px;
-    font-size: 9px;
+    font-size: 11px;
   }
   .history-stat strong {
     font-size: 19px;
@@ -1311,7 +1321,7 @@ details summary {
     max-width: 260px;
   }
   .banner {
-    font-size: 11px;
+    font-size: 13px;
   }
 }
 dialog.share-dialog {
@@ -1354,7 +1364,7 @@ dialog.share-dialog {
 }
 .share-product-option strong {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   line-height: 1.7;
 }
@@ -1365,10 +1375,10 @@ dialog.share-dialog {
 }
 #share-link {
   width: 100%;
-  font-size: 11px;
+  font-size: 13px;
 }
 #share-text {
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.7;
 }
 .share-page {
@@ -1388,7 +1398,7 @@ dialog.share-dialog {
   text-decoration: none;
 }
 .share-workspace {
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .share-intro {
@@ -1399,7 +1409,7 @@ dialog.share-dialog {
 }
 .share-intro p {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .shared-products {
   list-style: none;
@@ -1422,12 +1432,12 @@ dialog.share-dialog {
 .shared-index {
   background: var(--soft);
   color: var(--green);
-  font-size: 12px;
+  font-size: 14px;
   padding: 9px;
   border-radius: 8px;
 }
 .shared-url {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   overflow-wrap: anywhere;
   margin-top: 7px;
@@ -1445,12 +1455,12 @@ dialog.share-dialog {
     padding: 20px 16px;
   }
   .share-header .brand {
-    font-size: 13px;
+    font-size: 14px;
     letter-spacing: 1px;
     gap: 8px;
   }
   .share-workspace {
-    font-size: 10px;
+    font-size: 12px;
   }
   .share-intro {
     padding: 30px 0 20px;
