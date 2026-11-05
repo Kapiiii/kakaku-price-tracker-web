@@ -914,6 +914,12 @@ th.numeric {
   border-color: #eedfc6;
   color: #926a32;
 }
+.banner-settings {
+  border-color: var(--green);
+  color: var(--green);
+  background: #fff;
+  margin: 6px 0 6px 6px;
+}
 .banner details {
   margin-top: 8px;
 }

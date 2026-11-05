@@ -566,7 +566,7 @@ function renderCompare() {
     ).join("")
   }</div>${
     estimates
-      ? `<div class="banner warning">${estimates}商品に、条件が合う別商品の「代替参考価格」を使用しています。取得した候補・ショップ内の最安値です。商品名と取得元は詳細から確認できます。「設定・データ」の「代替参考価格を使う」をOFFにすると、代替参考価格の取得と表示を停止できます。 <button class="ghost small-button" data-tab="manage">設定・データを開く</button></div>`
+      ? `<div class="banner warning">${estimates}商品に、条件が合う別商品の「代替参考価格」を使用しています。取得した候補・ショップ内の最安値です。商品名と取得元は詳細から確認できます。「設定・データ」の「代替参考価格を使う」をOFFにすると、代替参考価格の取得と表示を停止できます。 <button class="small-button banner-settings" data-tab="manage">設定・データを開く</button></div>`
       : ""
   }${
     carried
