@@ -790,6 +790,45 @@ hr {
   color: #8a958d;
   margin-top: 6px;
 }
+.panel-header.has-information {
+  position: relative;
+  padding-right: 64px;
+}
+.information {
+  position: absolute;
+  top: 15px;
+  right: 17px;
+}
+.info-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 5px;
+  border: 1px solid #bfd2c7;
+  border-radius: 50%;
+  color: var(--green);
+  background: #f2f7f3;
+}
+.info-button svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.info-button .info-dot {
+  fill: currentColor;
+  stroke: none;
+}
+dialog.info-dialog {
+  width: min(620px, calc(100vw - 32px));
+}
+.info-body .help {
+  color: #52675c;
+  font-size: 14px;
+}
 .panel-body {
   padding: 22px;
 }

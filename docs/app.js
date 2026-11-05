@@ -143,9 +143,9 @@ function fallbackSettings(product) {
     : "自動検索に使える条件はまだありません。次回の商品取得時に判定します。";
   return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
-  }"><p class="help">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p>${
+  }"><p class="help" data-explanation>登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p>${
     fallbackFields(mode, product.fallback_url)
-  }<p class="help">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
+  }<p class="help" data-explanation>一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
     job ? "disabled" : ""
   }>代替条件を保存</button><p class="help">現在の設定：${condition}</p></form>`;
 }
@@ -430,7 +430,11 @@ function renderExclusions(target = "#exclusions") {
           }><span title="${esc(s.name)}">${esc(s.name)}</span></label>`
         ).join("")
         : '<p class="side-note">取得後にショップが表示されます。</p>'
-    }</div><p class="side-note">チェックしたショップを計算から除外します。切り替えると総額も変わります。</p><button class="ghost small-button" data-action="clear-excluded" ${
+    }</div>${
+      target === "#manage-exclusions"
+        ? ""
+        : '<p class="side-note">チェックしたショップを計算から除外します。切り替えると総額も変わります。</p>'
+    }<button class="ghost small-button" data-action="clear-excluded" ${
       state.excluded.length ? "" : "hidden"
     }>除外をすべて解除</button>`;
 }
@@ -517,8 +521,41 @@ function renderContent() {
   if (!state) return;
   ({ compare: renderCompare, history: renderHistory, product: renderProduct, manage: renderManage })[tab]();
   renderSectionTabs();
+  renderInformationButtons();
   const form = settingsForm();
   if (form) savedFormValues.set(form, formValues(form));
+}
+function renderInformationButtons() {
+  const explanations = new Map();
+  for (const node of document.querySelectorAll("#content [data-explanation]")) {
+    const panel = node.closest(".panel") ?? node.closest(".section-stack")?.querySelector(".panel");
+    if (!panel) continue;
+    const nodes = explanations.get(panel) ?? [];
+    nodes.push(node);
+    explanations.set(panel, nodes);
+  }
+  for (const [panel, nodes] of explanations) {
+    const header = panel.querySelector(".panel-header");
+    const title = header?.querySelector("h2,h3")?.textContent.trim();
+    if (!title) continue;
+    const help = document.createElement("span");
+    help.className = "information";
+    help.innerHTML = `<button type="button" class="info-button" data-information aria-label="${
+      esc(title)
+    }の説明を表示" aria-haspopup="dialog" title="${
+      esc(title)
+    }の説明"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle class="info-dot" cx="12" cy="7.5" r="1"/></svg></button><template><h2>${
+      esc(title)
+    }について</h2><div class="info-body"></div><div class="actions"><button type="button" data-close>閉じる</button></div></template>`;
+    const body = help.querySelector("template").content.querySelector(".info-body");
+    for (const node of nodes) {
+      node.removeAttribute("data-explanation");
+      node.className = "help";
+      body.append(node);
+    }
+    header.classList.add("has-information");
+    header.append(help);
+  }
 }
 function renderSectionTabs() {
   const content = $("#content"), definitions = pageSections[tab];
@@ -675,11 +712,11 @@ function renderCompare() {
             alternative(r.filteredOffer)
           }</td><td><button class="ghost small-button" data-product="${esc(r.id)}">詳細 →</button></td></tr>`
         ).join("")
-      }</tbody></table></div><div class="table-foot">${rows.length} 商品 · 小計は価格のある商品のみの合算です。差額は両方の時点で同じ価格種別の商品で比較します。実価格と代替参考価格の切り替わりは値下がりとして計算しません。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</div>`
+      }</tbody></table></div><div class="table-foot">${rows.length} 商品</div><p class="help" data-explanation>小計は価格のある商品のみの合算です。差額は両方の時点で同じ価格種別の商品で比較します。実価格と代替参考価格の切り替わりは値下がりとして計算しません。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</p>`
       : emptyView()
   }</section>${
     state.snapshots.length > 1
-      ? `<section class="panel"><div class="panel-header"><div><h2>総額の動き</h2><p>現在の登録商品で比較 · 除外設定は過去分にも適用</p></div><button class="ghost small-button" data-tab="history">履歴をすべて見る →</button></div>${
+      ? `<section class="panel"><div class="panel-header"><div><h2>総額の動き</h2><p data-explanation>現在の登録商品で比較 · 除外設定は過去分にも適用</p></div><button class="ghost small-button" data-tab="history">履歴をすべて見る →</button></div>${
         chart(basketHistory(view, true).slice(-30))
       }<div class="legend"><span><i></i>最安価格の合計</span><span><i class="gold"></i>ショップ除外後</span></div></section>`
       : ""
@@ -778,7 +815,7 @@ function renderHistory() {
     comparable ? delta(last.value - first.value) : "—"
   }</strong><small>${
     comparable ? "同じ商品・取得範囲で比較" : "商品構成・取得範囲が異なる場合は比較しません"
-  }</small></div><div class="history-stat">価格の記録<strong>${records.length} <small>回</small></strong><small>ボタンを押して更新した履歴</small></div></div><section class="panel"><div class="panel-header"><div><h2>総額の推移</h2><p>線が途切れる箇所は商品構成・取得範囲・実価格と代替参考価格が切り替わった時点です。</p></div><div class="toolbar"><select aria-label="集計対象" data-scope><option value="all" ${
+  }</small></div><div class="history-stat">価格の記録<strong>${records.length} <small>回</small></strong><small>ボタンを押して更新した履歴</small></div></div><section class="panel"><div class="panel-header"><div><h2>総額の推移</h2><p data-explanation>線が途切れる箇所は商品構成・取得範囲・実価格と代替参考価格が切り替わった時点です。</p></div><div class="toolbar"><select aria-label="集計対象" data-scope><option value="all" ${
     !fixed ? "selected" : ""
   }>当時の商品構成</option><option value="fixed" ${
     fixed ? "selected" : ""
@@ -802,7 +839,7 @@ function renderHistory() {
         esc(r.id)
       }">内訳 →</button></td></tr>`
     ).join("") || '<tr><td colspan="7">まだ価格の記録がありません。</td></tr>'
-  }</tbody></table></div><div class="table-foot">過去の除外後総額も、現在チェックしているショップを除外して再計算します。当時未取得の商品には未来の価格を補いません。</div></section>`;
+  }</tbody></table></div><p class="help" data-explanation>過去の除外後総額も、現在チェックしているショップを除外して再計算します。当時未取得の商品には未来の価格を補いません。</p></section>`;
 }
 function productSelect(products, location, label) {
   return `<label class="field">${label}<select data-product-select="${location}">${
@@ -881,7 +918,7 @@ function renderProduct() {
           esc(capture.fallback.search_url)
         }" target="_blank" rel="noopener noreferrer">検索条件を開く ↗</a></div>`
         : ""
-    }</div></section><section class="panel section-space" data-page-section="history"><div class="panel-header"><div><h2>この商品の価格推移</h2><p>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
+    }</div></section><section class="panel section-space" data-page-section="history"><div class="panel-header"><div><h2>この商品の価格推移</h2><p data-explanation>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
       chart(records, "保存時点ごとの商品価格推移")
     }<div class="legend"><span><i></i>最安価格</span><span><i class="gold"></i>ショップ除外後</span><span>白抜きの点・破線：代替参考価格</span></div></section><div class="details-grid"><section class="panel" data-page-section="shops"><div class="panel-header"><h2>${
       capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
@@ -944,20 +981,20 @@ function renderManage() {
         `<option value="${hour}" ${(state.settings.daily_hour ?? 9) === hour ? "selected" : ""}>毎日 ${
           String(hour).padStart(2, "0")
         }:00</option>`).join("")
-    }</select></label><p class="help">PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="row"><input type="checkbox" name="fallback_enabled" ${
+    }</select></label><p class="help" data-explanation><strong>毎日の自動更新</strong><br>PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="row"><input type="checkbox" name="fallback_enabled" ${
       state.settings.fallback_enabled !== false ? "checked" : ""
-    }>代替参考価格を使う</label><p class="help">OFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help">商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。${
+    }>代替参考価格を使う</label><p class="help" data-explanation><strong>代替参考価格の利用</strong><br>「代替参考価格を使う」をOFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help" data-explanation>商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。${
       visibleProducts().length
         ? ' <a href="#product-fallback-settings" data-tab="product">商品ごとの代替条件を開く ↓</a>'
         : ""
     }</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
-    }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
+    }</select></label><p class="help" data-explanation><strong>アクセス間隔</strong><br>最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help" data-explanation>登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
       job ? "disabled" : ""
-    }>JSONから復元</button></div><hr><h3>保存した商品HTMLから登録・更新</h3><p class="help">自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
+    }>JSONから復元</button></div><hr><h3>保存した商品HTMLから登録・更新</h3><p class="help" data-explanation><strong>保存HTMLの読み込み</strong><br>自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
       job ? "disabled" : ""
-    }>保存HTMLを読み込む</button></div></section><section class="panel" data-page-section="shops"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body" id="manage-exclusions"></div></section><section class="panel" data-page-section="products"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help">削除した商品はすべてのグループの現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
+    }>保存HTMLを読み込む</button></div></section><section class="panel" data-page-section="shops"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body"><p class="help" data-explanation>チェックしたショップを計算から除外します。切り替えると総額と商品ごとの価格が再計算されます。</p><div id="manage-exclusions"></div></div></section><section class="panel" data-page-section="products"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help" data-explanation>削除した商品はすべてのグループの現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
       visibleProducts().map((p) =>
         `<label class="row"><input name="product" type="checkbox" value="${esc(p.id)}"><span>${
           esc(p.name)
@@ -965,7 +1002,7 @@ function renderManage() {
       ).join("") || '<p class="help">登録商品がありません。</p>'
     }</div><button class="danger section-space" type="submit" ${
       job || !visibleProducts().length ? "disabled" : ""
-    }>選択した商品を削除</button></form></div></section></div><p class="help section-space" data-page-section="pricing">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
+    }>選択した商品を削除</button></form></div></section></div><p class="help section-space" data-page-section="pricing" data-explanation>自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
   if (!demo) {
     $("#content .details-grid").insertAdjacentHTML(
@@ -1450,6 +1487,10 @@ document.addEventListener("click", (event) => {
     $("#modal").close();
     return;
   }
+  if (target.hasAttribute("data-information")) {
+    modal(target.nextElementSibling.innerHTML, "info-dialog");
+    return;
+  }
   if (target.dataset.sectionTab) {
     navigateSection(target.dataset.sectionTab);
     return;
@@ -1457,6 +1498,7 @@ document.addEventListener("click", (event) => {
   if (target.dataset.tab) {
     const destination = target.hash;
     if (destination) event.preventDefault();
+    if (target.closest(".info-dialog")) $("#modal").close();
     navigateTab(target.dataset.tab, destination);
     return;
   }
