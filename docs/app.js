@@ -985,11 +985,11 @@ function renderManage() {
         }:00</option>`).join("")
     }</select></label><p class="help" data-explanation="daily"><strong>毎日の自動更新</strong><br>PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><div class="setting-title" data-info-anchor="fallback" data-info-title="代替参考価格を使う"><label class="row"><input type="checkbox" name="fallback_enabled" ${
       state.settings.fallback_enabled !== false ? "checked" : ""
-    }>代替参考価格を使う</label></div><p class="help" data-explanation="fallback"><strong>代替参考価格の利用</strong><br>「代替参考価格を使う」をOFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help" data-explanation="fallback">商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。${
+    }>代替参考価格を使う</label></div>${
       visibleProducts().length
-        ? ' <a href="#product-fallback-settings" data-tab="product">商品ごとの代替条件を開く ↓</a>'
+        ? '<p class="help"><a href="#product-fallback-settings" data-tab="product">商品ごとの代替条件を開く ↓</a></p>'
         : ""
-    }</p><hr><div class="field"><div class="field-label" data-info-anchor="interval" data-info-title="商品ページへのアクセス間隔（秒）"><label for="fetch-interval">商品ページへのアクセス間隔（秒）</label></div><input id="fetch-interval" type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></div><label class="field">保持するショップ数<select name="max_shops">${
+    }<p class="help" data-explanation="fallback"><strong>代替参考価格の利用</strong><br>「代替参考価格を使う」をOFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help" data-explanation="fallback">商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。</p><hr><div class="field"><div class="field-label" data-info-anchor="interval" data-info-title="商品ページへのアクセス間隔（秒）"><label for="fetch-interval">商品ページへのアクセス間隔（秒）</label></div><input id="fetch-interval" type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></div><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
     }</select></label><p class="help" data-explanation="interval"><strong>アクセス間隔</strong><br>最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help" data-explanation>登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
