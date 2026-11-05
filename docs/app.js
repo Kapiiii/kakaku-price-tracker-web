@@ -143,21 +143,22 @@ function fallbackSettings(product) {
     : "自動検索に使える条件はまだありません。次回の商品取得時に判定します。";
   return `<form class="fallback-settings" data-fallback-product="${
     esc(product.id)
-  }"><p class="help" data-explanation>登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p>${
+  }"><p class="help" data-explanation="product-fallback">登録商品の価格を取得できなかったときに使う条件です。自動判定では価格.comの商品仕様から、容量やサイズなどの検索条件を読み取ります。条件を読み取れない商品は、絞り込んだ製品一覧のURLを指定できます。</p>${
     fallbackFields(mode, product.fallback_url)
-  }<p class="help" data-explanation>一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
+  }<p class="help" data-explanation="product-fallback">一覧の価格がある最大20候補を順番に確認し、取得できた候補・ショップ内の最安価格を採用します。サイズ・色・冷却方式などは別商品になるため、購入前に確認してください。設定は次回の価格更新から適用します。</p><button type="submit" class="small-button" ${
     job ? "disabled" : ""
   }>代替条件を保存</button><p class="help">現在の設定：${condition}</p></form>`;
 }
 function fallbackFields(mode, url = "") {
-  return `<label class="field">代替候補<select name="mode" data-fallback-mode>${
+  const id = `fallback-mode-${crypto.randomUUID()}`;
+  return `<div class="field"><div class="field-label" data-info-anchor="product-fallback" data-info-title="代替候補"><label for="${id}">代替候補</label></div><select id="${id}" name="mode" data-fallback-mode>${
     [["off", "代替価格を使わない"], ["auto", "自動判定（商品仕様から）"], [
       "custom",
       "絞り込み一覧を指定",
     ]].map(([value, label]) =>
       `<option value="${value}" ${value === mode ? "selected" : ""}>${label}</option>`
     ).join("")
-  }</select></label><div data-fallback-url ${
+  }</select></div><div data-fallback-url ${
     mode === "custom" ? "" : "hidden"
   }><label class="field">条件を絞った製品一覧のURL<input name="fallback_url" type="url" value="${
     esc(url ?? "")
@@ -529,14 +530,16 @@ function renderInformationButtons() {
   const explanations = new Map();
   for (const node of document.querySelectorAll("#content [data-explanation]")) {
     const panel = node.closest(".panel") ?? node.closest(".section-stack")?.querySelector(".panel");
-    if (!panel) continue;
-    const nodes = explanations.get(panel) ?? [];
+    const anchor = node.dataset.explanation
+      ? $(`#content [data-info-anchor="${node.dataset.explanation}"]`)
+      : panel?.querySelector(".panel-header h2,.panel-header h3");
+    if (!anchor) continue;
+    const nodes = explanations.get(anchor) ?? [];
     nodes.push(node);
-    explanations.set(panel, nodes);
+    explanations.set(anchor, nodes);
   }
-  for (const [panel, nodes] of explanations) {
-    const header = panel.querySelector(".panel-header");
-    const title = header?.querySelector("h2,h3")?.textContent.trim();
+  for (const [anchor, nodes] of explanations) {
+    const title = anchor.dataset.infoTitle ?? anchor.textContent.trim();
     if (!title) continue;
     const help = document.createElement("span");
     help.className = "information";
@@ -553,8 +556,7 @@ function renderInformationButtons() {
       node.className = "help";
       body.append(node);
     }
-    header.classList.add("has-information");
-    header.append(help);
+    anchor.append(help);
   }
 }
 function renderSectionTabs() {
@@ -974,25 +976,25 @@ function showDeletionStatus(panel, status) {
 }
 function renderManage() {
   $("#content").innerHTML =
-    `<div class="details-grid"><section class="panel" data-page-section="pricing"><div class="panel-header"><h2>価格の取得設定</h2></div><div class="panel-body"><form data-settings><label class="row"><input type="checkbox" name="daily_enabled" ${
+    `<div class="details-grid"><section class="panel" data-page-section="pricing"><div class="panel-header"><h2 data-info-anchor="pricing">価格の取得設定</h2></div><div class="panel-body"><form data-settings><div class="setting-title" data-info-anchor="daily" data-info-title="毎日の自動更新"><label class="row"><input type="checkbox" name="daily_enabled" ${
       state.settings.daily_enabled !== false ? "checked" : ""
-    }>毎日1回、自動で価格を更新する</label><label class="field">自動更新の開始時刻（日本時間）<select name="daily_hour">${
+    }>毎日1回、自動で価格を更新する</label></div><label class="field">自動更新の開始時刻（日本時間）<select name="daily_hour">${
       Array.from({ length: 24 }, (_, hour) =>
         `<option value="${hour}" ${(state.settings.daily_hour ?? 9) === hour ? "selected" : ""}>毎日 ${
           String(hour).padStart(2, "0")
         }:00</option>`).join("")
-    }</select></label><p class="help" data-explanation><strong>毎日の自動更新</strong><br>PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><label class="row"><input type="checkbox" name="fallback_enabled" ${
+    }</select></label><p class="help" data-explanation="daily"><strong>毎日の自動更新</strong><br>PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><div class="setting-title" data-info-anchor="fallback" data-info-title="代替参考価格を使う"><label class="row"><input type="checkbox" name="fallback_enabled" ${
       state.settings.fallback_enabled !== false ? "checked" : ""
-    }>代替参考価格を使う</label><p class="help" data-explanation><strong>代替参考価格の利用</strong><br>「代替参考価格を使う」をOFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help" data-explanation>商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。${
+    }>代替参考価格を使う</label></div><p class="help" data-explanation="fallback"><strong>代替参考価格の利用</strong><br>「代替参考価格を使う」をOFFにして保存すると、別商品の価格の取得・表示を停止します。登録商品の最後に取得できた価格を表示し、実価格がなければ未取得として扱います。</p><p class="help" data-explanation="fallback">商品ごとに代替候補の条件や、代替参考価格を使うかどうかを設定できます。${
       visibleProducts().length
         ? ' <a href="#product-fallback-settings" data-tab="product">商品ごとの代替条件を開く ↓</a>'
         : ""
-    }</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
+    }</p><hr><div class="field"><div class="field-label" data-info-anchor="interval" data-info-title="商品ページへのアクセス間隔（秒）"><label for="fetch-interval">商品ページへのアクセス間隔（秒）</label></div><input id="fetch-interval" type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></div><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
-    }</select></label><p class="help" data-explanation><strong>アクセス間隔</strong><br>最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help" data-explanation>登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
+    }</select></label><p class="help" data-explanation="interval"><strong>アクセス間隔</strong><br>最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help" data-explanation>登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
       job ? "disabled" : ""
-    }>JSONから復元</button></div><hr><h3>保存した商品HTMLから登録・更新</h3><p class="help" data-explanation><strong>保存HTMLの読み込み</strong><br>自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
+    }>JSONから復元</button></div><hr><h3 data-info-anchor="html">保存した商品HTMLから登録・更新</h3><p class="help" data-explanation="html"><strong>保存HTMLの読み込み</strong><br>自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
       job ? "disabled" : ""
     }>保存HTMLを読み込む</button></div></section><section class="panel" data-page-section="shops"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body"><p class="help" data-explanation>チェックしたショップを計算から除外します。切り替えると総額と商品ごとの価格が再計算されます。</p><div id="manage-exclusions"></div></div></section><section class="panel" data-page-section="products"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help" data-explanation>削除した商品はすべてのグループの現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
       visibleProducts().map((p) =>
@@ -1002,7 +1004,7 @@ function renderManage() {
       ).join("") || '<p class="help">登録商品がありません。</p>'
     }</div><button class="danger section-space" type="submit" ${
       job || !visibleProducts().length ? "disabled" : ""
-    }>選択した商品を削除</button></form></div></section></div><p class="help section-space" data-page-section="pricing" data-explanation>自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
+    }>選択した商品を削除</button></form></div></section></div><p class="help section-space" data-page-section="pricing" data-explanation="pricing">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
   if (!demo) {
     $("#content .details-grid").insertAdjacentHTML(

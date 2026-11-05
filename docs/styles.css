@@ -130,7 +130,7 @@ input[type=checkbox] {
 label {
   font-size: 14px;
 }
-label.field {
+.field {
   display: grid;
   gap: 8px;
   margin: 16px 0;
@@ -790,29 +790,33 @@ hr {
   color: #8a958d;
   margin-top: 6px;
 }
-.panel-header.has-information {
-  position: relative;
-  padding-right: 64px;
+.setting-title,
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .information {
-  position: absolute;
-  top: 15px;
-  right: 17px;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 3px;
+  line-height: 1;
 }
 .info-button {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  padding: 5px;
-  border: 1px solid #bfd2c7;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  border: 0;
   border-radius: 50%;
   color: var(--green);
-  background: #f2f7f3;
+  background: transparent;
 }
 .info-button svg {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;
