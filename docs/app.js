@@ -399,13 +399,6 @@ function shell() {
     }</div></section><div id="job"></div><section class="page-heading"><div><span class="eyebrow">${
       tab === "history" ? "Basket timeline" : "My price journal"
     }</span><h1>${tabs.find((t) => t[0] === tab)[2]}</h1><p>${
-      {
-        compare: "今の価格と、あのときの価格。買い物リストをひと目で比較。",
-        history: "買い物リスト全体の値動きを、時間を追って確認。",
-        product: "ショップ別の価格と、これまでの記録。",
-        manage: "除外ショップ、取得設定、データのバックアップ。",
-      }[tab]
-    }</p><p>${
       state.settings.daily_enabled !== false
         ? `自動更新：毎日 ${String(state.settings.daily_hour ?? 9).padStart(2, "0")}:00 開始（日本時間）`
         : "自動更新：OFF"
