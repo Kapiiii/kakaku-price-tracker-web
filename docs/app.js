@@ -499,6 +499,14 @@ function renderJob() {
     : "";
 }
 const savedFormValues = new WeakMap();
+const sectionSelection = { product: "history", manage: "pricing" };
+const pageSections = {
+  product: [["history", "価格の履歴"], ["shops", "ショップ別価格"], ["fallback", "代替価格の条件"]],
+  manage: [["pricing", "価格の取得設定"], ["shops", "ショップの除外"], ["products", "商品の整理"], [
+    "backup",
+    "バックアップ・移行",
+  ], ["account", "アカウント"]],
+};
 const settingsForm = () => $("#content form[data-settings], #content form[data-fallback-product]");
 const formValues = (form) => JSON.stringify([...new FormData(form)]);
 function unsavedSettingsForm() {
@@ -508,8 +516,51 @@ function unsavedSettingsForm() {
 function renderContent() {
   if (!state) return;
   ({ compare: renderCompare, history: renderHistory, product: renderProduct, manage: renderManage })[tab]();
+  renderSectionTabs();
   const form = settingsForm();
   if (form) savedFormValues.set(form, formValues(form));
+}
+function renderSectionTabs() {
+  const content = $("#content"), definitions = pageSections[tab];
+  if (!definitions) return;
+  const available = definitions.filter(([id]) => content.querySelector(`[data-page-section="${id}"]`));
+  if (!available.length) return;
+  if (!available.some(([id]) => id === sectionSelection[tab])) sectionSelection[tab] = available[0][0];
+  content.insertAdjacentHTML(
+    "afterbegin",
+    `<div class="section-tabs" role="tablist" aria-label="${
+      tab === "product" ? "商品履歴の表示項目" : "設定項目"
+    }">${
+      available.map(([id, label]) =>
+        `<button type="button" role="tab" id="${tab}-tab-${id}" data-section-tab="${id}" aria-controls="${tab}-section-${id}" aria-selected="${
+          sectionSelection[tab] === id
+        }" tabindex="${sectionSelection[tab] === id ? 0 : -1}">${label}</button>`
+      ).join("")
+    }</div>`,
+  );
+  for (const [id] of available) {
+    const panel = document.createElement("section");
+    panel.id = `${tab}-section-${id}`;
+    panel.className = "section-stack";
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", `${tab}-tab-${id}`);
+    panel.hidden = sectionSelection[tab] !== id;
+    const sections = [...content.querySelectorAll(`[data-page-section="${id}"]`)];
+    panel.append(...sections);
+    content.append(panel);
+  }
+  for (const grid of content.querySelectorAll(".details-grid")) {
+    if (!grid.children.length) grid.remove();
+  }
+}
+function navigateSection(id) {
+  if (sectionSelection[tab] === id) return;
+  confirmSettingsNavigation(() => {
+    sectionSelection[tab] = id;
+    viewRevision++;
+    renderContent();
+    $(`[data-section-tab="${id}"]`)?.focus({ preventScroll: true });
+  });
 }
 function pointLabel() {
   return pastId === INITIAL_POINT
@@ -830,9 +881,9 @@ function renderProduct() {
           esc(capture.fallback.search_url)
         }" target="_blank" rel="noopener noreferrer">検索条件を開く ↗</a></div>`
         : ""
-    }</div></section><section class="panel section-space"><div class="panel-header"><div><h2>この商品の価格推移</h2><p>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
+    }</div></section><section class="panel section-space" data-page-section="history"><div class="panel-header"><div><h2>この商品の価格推移</h2><p>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
       chart(records, "保存時点ごとの商品価格推移")
-    }<div class="legend"><span><i></i>最安価格</span><span><i class="gold"></i>ショップ除外後</span><span>白抜きの点・破線：代替参考価格</span></div></section><div class="details-grid"><section class="panel"><div class="panel-header"><h2>${
+    }<div class="legend"><span><i></i>最安価格</span><span><i class="gold"></i>ショップ除外後</span><span>白抜きの点・破線：代替参考価格</span></div></section><div class="details-grid"><section class="panel" data-page-section="shops"><div class="panel-header"><h2>${
       capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
     }</h2><span class="count">${
       capture?.offers.length ?? 0
@@ -854,7 +905,7 @@ function renderProduct() {
           esc(o.stock_text)
         }</small></td></tr>`
       ).join("") || '<tr><td colspan="4">店舗別価格はまだありません。</td></tr>'
-    }</tbody></table></div></section><section class="panel"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
+    }</tbody></table></div></section><section class="panel" data-page-section="history"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
       [...records].reverse().map(({ date, item, saved: c, value, filteredValue }) =>
         `<tr><td><small>${esc(dateLabel(date))}</small></td><td class="numeric">${
           yen(value)
@@ -869,7 +920,7 @@ function renderProduct() {
           }[item.status]
         }</span></td></tr>`
       ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
-    }</tbody></table></div></section></div><section class="panel section-space"><div class="panel-header"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3></div><div class="panel-body">${
+    }</tbody></table></div></section></div><section class="panel section-space" data-page-section="fallback"><div class="panel-header"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3></div><div class="panel-body">${
       productSelect(products, "fallback", "代替条件を設定する商品")
     }${fallbackSettings(p)}<button class="small-button section-space" data-action="bulk-fallback" ${
       job ? "disabled" : ""
@@ -886,7 +937,7 @@ function showDeletionStatus(panel, status) {
 }
 function renderManage() {
   $("#content").innerHTML =
-    `<div class="details-grid"><section class="panel"><div class="panel-header"><h2>価格の取得設定</h2></div><div class="panel-body"><form data-settings><label class="row"><input type="checkbox" name="daily_enabled" ${
+    `<div class="details-grid"><section class="panel" data-page-section="pricing"><div class="panel-header"><h2>価格の取得設定</h2></div><div class="panel-body"><form data-settings><label class="row"><input type="checkbox" name="daily_enabled" ${
       state.settings.daily_enabled !== false ? "checked" : ""
     }>毎日1回、自動で価格を更新する</label><label class="field">自動更新の開始時刻（日本時間）<select name="daily_hour">${
       Array.from({ length: 24 }, (_, hour) =>
@@ -902,11 +953,11 @@ function renderManage() {
     }</p><hr><label class="field">商品ページへのアクセス間隔（秒）<input type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></label><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
-    }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
+    }</select></label><p class="help">最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help">登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
       job ? "disabled" : ""
     }>JSONから復元</button></div><hr><h3>保存した商品HTMLから登録・更新</h3><p class="help">自動取得できないときは、ブラウザーで開いた商品ページを「HTMLのみ」で保存して読み込めます。価格の日時は読み込んだ時点として記録します。</p><button data-action="html" ${
       job ? "disabled" : ""
-    }>保存HTMLを読み込む</button></div></section><section class="panel"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body" id="manage-exclusions"></div></section><section class="panel"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help">削除した商品はすべてのグループの現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
+    }>保存HTMLを読み込む</button></div></section><section class="panel" data-page-section="shops"><div class="panel-header"><h2>ショップの除外</h2></div><div class="panel-body" id="manage-exclusions"></div></section><section class="panel" data-page-section="products"><div class="panel-header"><h2>登録商品の整理</h2></div><div class="panel-body"><p class="help">削除した商品はすべてのグループの現在の総額から外れます。削除前の価格・総額は履歴から確認できます。</p><form data-archive><div class="stack">${
       visibleProducts().map((p) =>
         `<label class="row"><input name="product" type="checkbox" value="${esc(p.id)}"><span>${
           esc(p.name)
@@ -914,12 +965,12 @@ function renderManage() {
       ).join("") || '<p class="help">登録商品がありません。</p>'
     }</div><button class="danger section-space" type="submit" ${
       job || !visibleProducts().length ? "disabled" : ""
-    }>選択した商品を削除</button></form></div></section></div><p class="help section-space">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
+    }>選択した商品を削除</button></form></div></section></div><p class="help section-space" data-page-section="pricing">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
   renderExclusions("#manage-exclusions");
   if (!demo) {
     $("#content .details-grid").insertAdjacentHTML(
       "beforeend",
-      '<section class="panel"><div class="panel-header"><h2>アカウント</h2></div><div class="panel-body" id="account-deletion"><p class="help">削除予約の状態を読み込んでいます…</p></div></section>',
+      '<section class="panel" data-page-section="account"><div class="panel-header"><h2>アカウント</h2></div><div class="panel-body" id="account-deletion"><p class="help">削除予約の状態を読み込んでいます…</p></div></section>',
     );
     const panel = $("#account-deletion");
     api("account-deletion", { operation: "status" }).then((status) => {
@@ -941,6 +992,7 @@ function navigateTab(nextTab, destination) {
   if (nextTab === tab && !destination) return;
   const navigate = () => {
     tab = nextTab;
+    if (destination === "#product-fallback-settings") sectionSelection.product = "fallback";
     shell();
     if (destination === "#product-fallback-settings") {
       const heading = $(destination);
@@ -948,8 +1000,11 @@ function navigateTab(nextTab, destination) {
       heading?.scrollIntoView({ block: "center" });
     }
   };
+  confirmSettingsNavigation(navigate);
+}
+function confirmSettingsNavigation(navigate) {
   const form = unsavedSettingsForm();
-  if (!form || nextTab === tab) {
+  if (!form) {
     navigate();
     return;
   }
@@ -1395,6 +1450,10 @@ document.addEventListener("click", (event) => {
     $("#modal").close();
     return;
   }
+  if (target.dataset.sectionTab) {
+    navigateSection(target.dataset.sectionTab);
+    return;
+  }
   if (target.dataset.tab) {
     const destination = target.hash;
     if (destination) event.preventDefault();
@@ -1403,6 +1462,7 @@ document.addEventListener("click", (event) => {
   }
   if (target.dataset.product) {
     selectedProduct = target.dataset.product;
+    sectionSelection.product = "history";
     tab = "product";
     shell();
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -1423,6 +1483,19 @@ document.addEventListener("click", (event) => {
       if (["refresh", "confirm-refresh"].includes(target.dataset.action)) renderManualQuota();
     });
   }
+});
+document.addEventListener("keydown", (event) => {
+  const current = event.target.closest("[data-section-tab]");
+  if (!current || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const buttons = [...current.parentElement.querySelectorAll("[data-section-tab]")];
+  const index = buttons.indexOf(current);
+  const next = event.key === "Home"
+    ? 0
+    : event.key === "End"
+    ? buttons.length - 1
+    : (index + (event.key === "ArrowRight" ? 1 : buttons.length - 1)) % buttons.length;
+  event.preventDefault();
+  navigateSection(buttons[next].dataset.sectionTab);
 });
 document.addEventListener("input", (event) => {
   const node = event.target;

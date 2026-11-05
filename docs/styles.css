@@ -736,6 +736,39 @@ hr {
 .metric.current .delta.up {
   color: #ffe1ac;
 }
+.section-tabs {
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 4px 3px 10px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.section-tabs button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: transparent;
+  border-color: transparent;
+  color: #52675c;
+}
+.section-tabs button[aria-selected="true"] {
+  border-color: #b5cec2;
+  background: #e4f0e9;
+  color: var(--green);
+}
+.section-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+.section-stack[hidden] {
+  display: none;
+}
+.section-stack > .panel {
+  margin: 0;
+}
 .panel {
   background: #fff;
   border: 1px solid var(--line);
