@@ -1,4 +1,5 @@
 import { PGlite } from "npm:@electric-sql/pglite@0.5.13";
+import { pgcrypto } from "npm:@electric-sql/pglite@0.5.13/contrib/pgcrypto";
 import { assert, equal, rejects } from "./assert.ts";
 import { dispatch } from "../supabase/functions/tracker-api/handler.ts";
 import { dailyHandler } from "../supabase/functions/tracker-daily/handler.ts";
@@ -8,11 +9,15 @@ const token = "a".repeat(64);
 const request = (body: unknown, secret = token) =>
   new Request("https://scheduler.test", {
     method: "POST",
-    headers: { "x-tracker-secret": secret, Authorization: "Bearer test.gateway.jwt" },
+    headers: {
+      "x-tracker-secret": secret,
+      Authorization: "Bearer test.gateway.jwt",
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(body),
   });
 Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authentication and fallback", async () => {
-  const db = new PGlite();
+  const db = new PGlite({ extensions: { pgcrypto } });
   try {
     await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
       create schema auth; create table auth.users(id uuid primary key);
@@ -56,6 +61,14 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
     equal((await db.query<{ n: number }>("select count(*)::int as n from cron.job")).rows[0].n, 2);
     equal((await db.query<{ n: number }>("select count(*)::int as n from vault.secrets")).rows[0].n, 3);
     await db.query("update vault.secrets set secret=$1 where name='price_note_daily_key'", [token]);
+    for (
+      const migration of [
+        "20261103095511_account_deletion.sql",
+        "20261106143114_restrict_tracker_and_scheduler_access.sql",
+      ]
+    ) {
+      await db.exec(await Deno.readTextFile(new URL(`../supabase/migrations/${migration}`, import.meta.url)));
+    }
     const admin = {
       rpc: async (name: string, args: Record<string, unknown>) => {
         try {
@@ -132,16 +145,25 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       (await sql("select origin from public.tracker_jobs where id=$1", [manualJob.job.id]))[0].origin,
       "manual",
     );
-    const tick = await rpc("tracker_daily_tick", {});
-    assert(tick);
-    const sent = (await sql("select * from net.requests where id=$1", [tick]))[0];
+    const nextRequest = async () => {
+      const tick = await rpc("tracker_daily_tick", {});
+      assert(tick);
+      return (await sql("select * from net.requests where id=$1", [tick]))[0];
+    };
+    const sent = await nextRequest(), proof = sent.headers["x-tracker-secret"];
     equal(sent.body.job_id, scheduled.id);
     equal(sent.timeout, 115000);
     equal(sent.headers.Authorization, "Bearer eyJ.test.jwt");
+    assert(/^[a-f0-9]{64}$/.test(proof) && proof !== token);
     equal(await rpc("tracker_daily_tick", {}), null); // 送信直後の二重起動を防ぐ
     equal((await dailyHandler(request({ probe: true }, "b".repeat(64)), async () => admin)).status, 401);
     equal((await dailyHandler(request({ probe: true }), async () => admin)).status, 200);
-    equal((await dailyHandler(request({ job_id: manualJob.job.id }), async () => admin)).status, 404);
+    equal((await dailyHandler(request({ job_id: manualJob.job.id }, proof), async () => admin)).status, 401);
+    equal((await dailyHandler(request({ job_id: scheduled.id }), async () => admin)).status, 401);
+    await sql("update public.tracker_jobs set dispatch_after=now()-interval '1 second' where id=$1", [
+      scheduled.id,
+    ]);
+    equal((await dailyHandler(request({ job_id: scheduled.id }, proof), async () => admin)).status, 401);
     let calls = 0;
     const fetchPrice = async () => {
       calls++;
@@ -155,7 +177,20 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       };
     };
     const process = (a: any, o: string, b: any) => dispatch(a, o, b, fetchPrice as any);
-    let result = await dailyHandler(request({ job_id: scheduled.id }), async () => admin, process);
+    const runNext = async () => {
+      const queued = await nextRequest();
+      return await dailyHandler(
+        request(queued.body, queued.headers["x-tracker-secret"]),
+        async () => admin,
+        process,
+      );
+    };
+    const queued = await nextRequest();
+    const receive = () =>
+      dailyHandler(request(queued.body, queued.headers["x-tracker-secret"]), async () => admin, process);
+    const responses = await Promise.all([receive(), receive()]);
+    equal(responses.map((r) => r.status).sort(), [200, 401]);
+    let result = responses.find((r) => r.ok)!;
     equal((await result.json()).done, 1);
     equal((await dispatch(admin, alice, { action: "status" })).job.done, 1);
     equal((await rpc("tracker_ensure_state", { p_owner: alice })).data.snapshots.length, 3);
@@ -164,8 +199,12 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
         .dispatch_after,
       null,
     );
-    await dailyHandler(request({ job_id: scheduled.id }), async () => admin, process);
-    result = await dailyHandler(request({ job_id: scheduled.id }), async () => admin, process);
+    equal(
+      (await dailyHandler(request({ job_id: scheduled.id }, proof), async () => admin, process)).status,
+      401,
+    );
+    await runNext();
+    result = await runNext();
     equal((await result.json()).status, "completed");
     const state = (await rpc("tracker_ensure_state", { p_owner: alice })).data;
     equal(state.snapshots.length, 4);
@@ -175,7 +214,10 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       false,
     ]]);
     equal(importBackup({ format_version: "cloud-1", data: state }).snapshots.at(-1).kind, "daily");
-    await dailyHandler(request({ job_id: scheduled.id }), async () => admin, process);
+    equal(
+      (await dailyHandler(request({ job_id: scheduled.id }, proof), async () => admin, process)).status,
+      401,
+    );
     equal(calls, 3);
     equal(await rpc("tracker_daily_enqueue", { p_now: `${today}T23:59:59+09:00` }), 0);
     await rejects(() =>
@@ -208,9 +250,10 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
     const nextDay = new Date(Date.parse(`${tomorrow}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
     equal(await rpc("tracker_daily_enqueue", { p_now: `${nextDay}T23:59:00+09:00` }), 0);
     await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${bob}',false);`);
-    equal((await sql("select * from public.tracker_jobs where user_id=$1", [alice])).length, 0);
     for (
       const query of [
+        "select * from public.tracker_jobs",
+        "select * from public.tracker_states",
         "select public.tracker_daily_enqueue()",
         "select public.tracker_status('" + alice + "')",
         "select public.tracker_daily_tick()",
@@ -220,7 +263,13 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
     ) await rejects(() => db.query(query));
     await db.exec("reset role; set role anon;");
     await rejects(() => db.query("select public.tracker_daily_enqueue()"));
+    await rejects(() => db.query("select * from public.tracker_states"));
     await db.exec("reset role;");
+    equal(
+      (await sql("select has_table_privilege('service_role','public.tracker_states','select') as allowed"))[0]
+        .allowed,
+      true,
+    );
   } finally {
     await db.close();
   }

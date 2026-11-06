@@ -1,7 +1,13 @@
 export const RTX5080_URL = "https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499&pdf_so=p1";
 export const FALLBACK_LIMIT = 20;
 export function categoryURL(value) {
-  const u = new URL(String(value));
+  let u;
+  try {
+    if (typeof value !== "string" || value.length > 4096) throw new TypeError();
+    u = new URL(value);
+  } catch {
+    throw new Error("価格.comで条件を絞った製品一覧のURLを指定してください。");
+  }
   if (
     u.protocol !== "https:" || u.hostname !== "kakaku.com" || u.port || u.username || u.password ||
     !/^\/[a-z0-9-]+\/[a-z0-9-]+\/itemlist\.aspx$/.test(u.pathname)

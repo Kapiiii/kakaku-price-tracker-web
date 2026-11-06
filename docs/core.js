@@ -141,7 +141,8 @@ export function groupView(state, groupID) {
 export function canonicalURL(value) {
   let u;
   try {
-    u = new URL(String(value).trim());
+    if (typeof value !== "string" || value.length > 4096) throw new TypeError();
+    u = new URL(value.trim());
   } catch {
     throw new Error("商品URLの形式を確認してください。");
   }
@@ -162,6 +163,20 @@ export const safeURL = (value) => {
     return "";
   }
 };
+export function productImageURL(value) {
+  if (typeof value !== "string" || value.length > 4096) return "";
+  const safe = safeURL(value);
+  if (!safe) return "";
+  const url = new URL(safe);
+  if (
+    url.port ||
+    !["kakaku.com", "kakaku.k-img.com"].some((host) =>
+      url.hostname === host || url.hostname.endsWith("." + host)
+    )
+  ) return "";
+  url.protocol = "https:";
+  return url.href;
+}
 export const activeProducts = (state) => state.products.filter((p) => !p.archived_at);
 export const capMap = (state) => new Map(state.captures.map((c) => [String(c.id), c]));
 export const itemMap = (snapshot) => new Map((snapshot?.items ?? []).map((i) => [String(i.product_id), i]));
@@ -276,7 +291,7 @@ export function comparison(state, pastId = comparisonPoint(state)) {
       id: p.id,
       name: p.name,
       url: p.url,
-      image_url: p.image_url,
+      image_url: productImageURL(p.image_url) || null,
       initial: first?.price ?? null,
       initial_basis: priceBasis(initial),
       current_basis: priceBasis(c),
@@ -348,7 +363,8 @@ export function applyResults(input, results, kind = "update", started = nowISO()
       if (typeof result.metadata.name === "string" && result.metadata.name.trim()) {
         product.name = result.metadata.name.slice(0, 500);
       }
-      if (safeURL(result.metadata.image_url)) product.image_url = safeURL(result.metadata.image_url);
+      const image = productImageURL(result.metadata.image_url);
+      if (image) product.image_url = image;
       if (optionalCategory(result.metadata.category_url)) {
         product.auto_fallback_url = categoryURL(result.metadata.category_url);
       }
@@ -455,7 +471,7 @@ export function csv(rows) {
   const cell = (v) => {
     if (v == null) return "";
     let s = String(v);
-    if (typeof v === "string" && /^[\s]*[=+@\-\t\r]/.test(s)) s = "'" + s;
+    if (typeof v === "string" && /^[\s]*[=+@＝＋－＠\-\t\r\n]/.test(s)) s = "'" + s;
     return '"' + s.replaceAll('"', '""') + '"';
   };
   return "\ufeff" +
@@ -510,7 +526,7 @@ export function validateData(data) {
     ...(fallback ? { fallback } : {}),
     category_url: optionalCategory(data.category_url),
     name: data.name.trim(),
-    image_url: safeURL(data.image_url) || null,
+    image_url: productImageURL(data.image_url) || null,
     offers,
     source: ["live", "html", "demo", "legacy", "fallback"].includes(data.source) ? data.source : "legacy",
     fetched_at: Number.isFinite(+new Date(data.fetched_at))
@@ -518,42 +534,68 @@ export function validateData(data) {
       : nowISO(),
   };
 }
+const MAX_BACKUP_PRODUCTS = 1000, MAX_BACKUP_CAPTURES = 50000, MAX_BACKUP_SNAPSHOTS = 10000;
+const boundedList = (value, max) => Array.isArray(value) && value.length <= max;
+function backupID(value) {
+  if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
+  if (typeof value === "string" && value.trim() && value.length <= 100 && !value.includes("\0")) return value;
+  throw new Error("バックアップのIDが正しくありません。");
+}
+function indexBackupRows(rows, key, maxPerParent) {
+  const index = new Map();
+  for (const row of rows) {
+    const id = backupID(row?.[key]);
+    if (!index.has(id)) index.set(id, []);
+    const group = index.get(id);
+    if (group.length >= maxPerParent) throw new Error("バックアップの関連データが多すぎます。");
+    group.push(row);
+  }
+  return index;
+}
 export function importBackup(input) {
   let state;
-  if (input?.format_version === "cloud-1") state = clone(input.data);
-  else if (
-    input?.format_version === 1 &&
-    ["products", "captures", "offers", "snapshots", "snapshot_items"].every((k) => Array.isArray(input[k]))
+  if (input?.format_version === "cloud-1") {
+    const { schema_version, products, captures, snapshots, excluded, settings, groups } = input.data ?? {};
+    state = { schema_version, products, captures, snapshots, excluded, settings, groups };
+  } else if (
+    input?.format_version === 1 && boundedList(input.products, MAX_BACKUP_PRODUCTS) &&
+    boundedList(input.captures, MAX_BACKUP_CAPTURES) && boundedList(input.snapshots, MAX_BACKUP_SNAPSHOTS) &&
+    boundedList(input.offers, MAX_BACKUP_CAPTURES * 20) &&
+    boundedList(input.snapshot_items, MAX_BACKUP_SNAPSHOTS * MAX_BACKUP_PRODUCTS) &&
+    boundedList(input.shops ?? [], MAX_BACKUP_CAPTURES * 20)
   ) {
     state = emptyState();
+    const offers = indexBackupRows(input.offers, "capture_id", 20);
+    const items = indexBackupRows(input.snapshot_items, "snapshot_id", MAX_BACKUP_PRODUCTS);
     state.products = input.products.map((p) => ({
       ...p,
-      id: `legacy-p-${p.id}`,
-      initial_capture_id: p.initial_capture_id == null ? null : `legacy-c-${p.initial_capture_id}`,
+      id: `legacy-p-${backupID(p?.id)}`,
+      initial_capture_id: p.initial_capture_id == null ? null : `legacy-c-${backupID(p.initial_capture_id)}`,
     }));
     state.captures = input.captures.map((c) => ({
       ...c,
-      id: `legacy-c-${c.id}`,
-      product_id: `legacy-p-${c.product_id}`,
+      id: `legacy-c-${backupID(c?.id)}`,
+      product_id: `legacy-p-${backupID(c.product_id)}`,
       name: c.product_name,
-      offers: input.offers.filter((o) => o.capture_id === c.id),
+      offers: offers.get(backupID(c.id)) ?? [],
       source: "legacy",
     }));
     state.snapshots = [...input.snapshots].sort((a, b) => a.id - b.id).map((s) => ({
       ...s,
-      id: `legacy-s-${s.id}`,
-      items: input.snapshot_items.filter((i) => i.snapshot_id === s.id).map((i) => ({
+      id: `legacy-s-${backupID(s?.id)}`,
+      items: (items.get(backupID(s.id)) ?? []).map((i) => ({
         ...i,
-        product_id: `legacy-p-${i.product_id}`,
-        capture_id: i.capture_id == null ? null : `legacy-c-${i.capture_id}`,
+        product_id: `legacy-p-${backupID(i.product_id)}`,
+        capture_id: i.capture_id == null ? null : `legacy-c-${backupID(i.capture_id)}`,
       })),
     }));
     state.excluded = (input.shops ?? []).filter((s) => s.excluded).map((s) => s.shop_key);
   } else throw new Error("このアプリのJSONバックアップを選択してください。");
   if (
-    !state || state.schema_version !== 1 || !Array.isArray(state.products) || state.products.length > 1000 ||
-    !Array.isArray(state.captures) || state.captures.length > 50000 || !Array.isArray(state.snapshots) ||
-    state.snapshots.length > 10000
+    state.schema_version !== 1 || !boundedList(state.products, MAX_BACKUP_PRODUCTS) ||
+    !boundedList(state.captures, MAX_BACKUP_CAPTURES) ||
+    !boundedList(state.snapshots, MAX_BACKUP_SNAPSHOTS) ||
+    !Array.isArray(state.excluded ?? [])
   ) throw new Error("バックアップの形式または件数を確認してください。");
   const groups = state.groups ?? [];
   if (!Array.isArray(groups) || groups.length > MAX_GROUPS) {
@@ -571,7 +613,7 @@ export function importBackup(input) {
   });
   const pids = new Set(), cids = new Set(), sids = new Set(), urls = new Set();
   state.products = state.products.map((p) => {
-    const id = String(p.id), url = canonicalURL(p.url);
+    const id = backupID(p?.id), url = canonicalURL(p.url);
     if (pids.has(id) || urls.has(url)) throw new Error("商品が重複しています。");
     pids.add(id);
     urls.add(url);
@@ -591,17 +633,17 @@ export function importBackup(input) {
       group_id: groups[0],
       ...(groups.length > 1 ? { group_ids: groups } : {}),
       name: String(p.name ?? "").slice(0, 500),
-      image_url: safeURL(p.image_url) || null,
+      image_url: productImageURL(p.image_url) || null,
       created_at: new Date(p.created_at).toISOString(),
       archived_at: p.archived_at ? new Date(p.archived_at).toISOString() : null,
-      initial_capture_id: p.initial_capture_id == null ? null : String(p.initial_capture_id),
+      initial_capture_id: p.initial_capture_id == null ? null : backupID(p.initial_capture_id),
       fallback_mode: ["auto", "custom"].includes(p.fallback_mode) ? p.fallback_mode : "off",
       fallback_url: p.fallback_mode === "custom" ? categoryURL(p.fallback_url) : null,
       auto_fallback_url: optionalCategory(p.auto_fallback_url),
     };
   });
   state.captures = state.captures.map((c) => {
-    const id = String(c.id), pid = String(c.product_id);
+    const id = backupID(c?.id), pid = backupID(c.product_id);
     if (cids.has(id) || !pids.has(pid)) throw new Error("価格履歴の関連付けが正しくありません。");
     cids.add(id);
     return { ...validateData(c), id, product_id: pid };
@@ -613,15 +655,15 @@ export function importBackup(input) {
     }
   }
   state.snapshots = state.snapshots.map((s) => {
-    const id = String(s.id);
+    const id = backupID(s?.id);
     if (
-      sids.has(id) || !Number.isFinite(+new Date(s.completed_at)) || !Array.isArray(s.items) ||
-      s.items.length > 1000
+      id === INITIAL_POINT || sids.has(id) || !Number.isFinite(+new Date(s.completed_at)) ||
+      !boundedList(s.items, MAX_BACKUP_PRODUCTS)
     ) throw new Error("保存時点の形式が正しくありません。");
     sids.add(id);
     const seen = new Set();
     const items = s.items.map((i) => {
-      const pid = String(i.product_id), cid = i.capture_id == null ? null : String(i.capture_id);
+      const pid = backupID(i?.product_id), cid = i.capture_id == null ? null : backupID(i.capture_id);
       if (seen.has(pid) || !pids.has(pid) || (cid && cm.get(cid)?.product_id !== pid)) {
         throw new Error("保存時点の価格参照が正しくありません。");
       }
@@ -641,11 +683,13 @@ export function importBackup(input) {
       items,
     };
   });
-  state.excluded = [...new Set((state.excluded ?? []).map(String))].slice(0, 2000);
+  state.excluded = [
+    ...new Set((state.excluded ?? []).filter((key) => typeof key === "string" && key.length <= 250)),
+  ].slice(0, 2000);
   state.settings = {
     comparison_point: comparisonPoint(state),
     fallback_enabled: state.settings?.fallback_enabled !== false,
-    interval: Math.max(3, Math.min(30, Number(state.settings?.interval) || 3)),
+    interval: Math.max(3, Math.min(30, Math.round(Number(state.settings?.interval) || 3))),
     max_shops: [10, 15, 20].includes(state.settings?.max_shops) ? state.settings.max_shops : 20,
     daily_enabled: state.settings?.daily_enabled !== false,
     daily_hour: Number.isInteger(state.settings?.daily_hour) && state.settings.daily_hour >= 0 &&

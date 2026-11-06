@@ -1,5 +1,6 @@
 import { createSupabaseContext } from "npm:@supabase/server@1.9.2";
 import { dispatch } from "../tracker-api/handler.ts";
+import { readJSONRequest, RequestError, UUID_PATTERN } from "../_shared/request.ts";
 type Client = any;
 async function makeAdmin() {
   const { data: ctx, error } = await createSupabaseContext(new Request("https://scheduler.invalid"), {
@@ -13,7 +14,7 @@ export async function dailyHandler(
   getAdmin: () => Promise<Client> = makeAdmin,
   process = dispatch,
 ): Promise<Response> {
-  const headers = { "Cache-Control": "no-store" };
+  const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (req.method !== "POST") return Response.json({ error: "POST required" }, { status: 405, headers });
   const secret = req.headers.get("x-tracker-secret") ?? "";
   if (!req.headers.get("Authorization")?.startsWith("Bearer ")) {
@@ -22,33 +23,25 @@ export async function dailyHandler(
   if (req.headers.has("Origin") || !/^[a-f0-9]{64}$/.test(secret)) {
     return Response.json({ error: "Unauthorized" }, { status: 401, headers });
   }
+  let body;
   try {
-    const reader = req.body?.getReader();
-    let text = "", size = 0;
-    if (!reader) return Response.json({ error: "Invalid request" }, { status: 400, headers });
-    const decoder = new TextDecoder();
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > 1024) {
-        await reader.cancel();
-        return Response.json({ error: "Request too large" }, { status: 413, headers });
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-    const body = JSON.parse(text), jobID = body.job_id;
+    ({ body } = await readJSONRequest(req, 1024));
+  } catch (error) {
+    const status = error instanceof RequestError ? error.status : 400;
+    return Response.json({ error: "Invalid request" }, { status, headers });
+  }
+  try {
+    const jobID = body.job_id;
     if (
       body.probe !== true &&
-      (typeof jobID !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(jobID))
+      (typeof jobID !== "string" || !UUID_PATTERN.test(jobID))
     ) return Response.json({ error: "Invalid job" }, { status: 400, headers });
     const admin = await getAdmin();
     const { data: target, error } = await admin.rpc("tracker_daily_target", {
       p_secret: secret,
       p_job: body.probe === true ? null : jobID,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error("Scheduler target lookup failed");
     if (!target?.authorized) return Response.json({ error: "Unauthorized" }, { status: 401, headers });
     if (body.probe === true) return Response.json({ ok: true }, { headers });
     if (!target.job) return Response.json({ error: "Job not found" }, { status: 404, headers });
@@ -59,8 +52,8 @@ export async function dailyHandler(
       status: result.job?.status ?? "running",
       done: result.job?.done ?? null,
     }, { headers });
-  } catch (error) {
-    console.error("Daily update failed:", error instanceof Error ? error.message : "unknown error");
+  } catch {
+    console.error("Daily update failed");
     return Response.json({ error: "Daily update will be retried" }, { status: 500, headers });
   }
 }

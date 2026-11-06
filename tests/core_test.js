@@ -18,6 +18,7 @@ import {
   importBackup,
   makeDemo,
   productGroupIDs,
+  productImageURL,
   summary,
 } from "../docs/core.js";
 const url = "https://kakaku.com/item/K0000000001/";
@@ -213,6 +214,46 @@ Deno.test("cloud import validates cross-product references and duplicate offers"
   throws(() => importBackup({ format_version: "cloud-1", data: duplicate }));
   throws(() => importBackup({ format_version: 1, products: [], captures: [], snapshot_items: [] }));
 });
+Deno.test("backup import strips unknown fields and rejects oversized legacy inputs and invalid identifiers", () => {
+  const original = makeDemo(),
+    input = {
+      ...original,
+      unknown: { retained: false },
+      products: original.products.map((p) => ({ ...p, image_url: "https://example.test/pixel" })),
+    };
+  const restored = importBackup({ format_version: "cloud-1", data: input });
+  assert(!("unknown" in restored));
+  equal(restored.products[0].image_url, null);
+  equal(input.products[0].image_url, "https://example.test/pixel");
+  const invalid = clone(original);
+  invalid.products[0].id = {};
+  throws(() => importBackup({ format_version: "cloud-1", data: invalid }));
+  throws(() =>
+    importBackup({
+      format_version: 1,
+      products: Array(1001).fill(null),
+      captures: [],
+      offers: [],
+      snapshots: [],
+      snapshot_items: [],
+    })
+  );
+});
+Deno.test("product images accept Kakaku sources and reject private hosts, spoofed domains and credentials", () => {
+  equal(
+    productImageURL("http://img1.kakaku.k-img.com/images/item.png"),
+    "https://img1.kakaku.k-img.com/images/item.png",
+  );
+  for (
+    const address of [
+      "https://kakaku.k-img.com.example.test/img.png",
+      "https://127.0.0.1/admin",
+      "https://kakaku.com@invalid.test/pixel",
+      "https://u:p@kakaku.com/pixel",
+      "https://img1.kakaku.k-img.com:8443/image.png",
+    ]
+  ) equal(productImageURL(address), "");
+});
 Deno.test("local Python backup migrates captures, exclusions and historical errors", () => {
   const backup = {
     format_version: 1,
@@ -231,4 +272,5 @@ Deno.test("CSV quotes and spreadsheet formula injection are neutralized", () => 
   assert(out.startsWith("\ufeff"));
   assert(out.includes("'=HYPERLINK"));
   assert(out.includes('"1000"'));
+  assert(csv([{ 商品名: "＝1+1" }]).includes("'＝1+1"));
 });

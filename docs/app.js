@@ -1,7 +1,7 @@
 import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js?v=github-only";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
-import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=bulk-fallback";
+import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=input-validation";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -31,7 +31,7 @@ import {
   shopList,
   summary,
   yen,
-} from "./core.js?v=history-performance";
+} from "./core.js?v=input-validation";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -182,6 +182,7 @@ async function api(action, values = {}) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ action, ...values }),
+    redirect: "error",
     signal: AbortSignal.timeout(115000),
   });
   const result = await response.json().catch(() => ({}));
@@ -1759,7 +1760,12 @@ async function saveForm(form) {
     } else if (form.hasAttribute("data-import")) {
       const file = data.get("file");
       if (file.size > 21000000) throw new Error("バックアップは21MB以下にしてください。");
-      const backup = JSON.parse(await file.text());
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch {
+        throw new Error("JSONバックアップを読み込めませんでした。");
+      }
       importBackup(backup);
       await flushPrefs();
       adopt((await api("import", { backup, confirm: data.get("confirm") === "on" })).state);

@@ -311,3 +311,38 @@ Deno.test("HTTP: CORS and absent authorization rejected before accessing data", 
   );
   equal((await handler(new Request("https://example.test", { method: "GET" }))).status, 405);
 });
+
+Deno.test("HTTP: reject malformed input and keep database details and ownership inside the API", async () => {
+  const owner = crypto.randomUUID(), otherUser = crypto.randomUUID();
+  const request = (body: BodyInit, headers: Record<string, string> = {}) =>
+    new Request("https://example.test", {
+      method: "POST",
+      body,
+      headers: { "Authorization": "Bearer test.jwt", "Content-Type": "application/json", ...headers },
+    });
+  const calls: unknown[] = [];
+  const session = async () => ({
+    owner,
+    admin: {
+      rpc: (_name: string, args: unknown) => {
+        calls.push(args);
+        return {
+          error: { code: "XX000", message: "private payload or credential", details: "another secret" },
+        };
+      },
+    },
+  });
+  equal((await handler(request("{}", { "Content-Type": "text/plain" }), session)).status, 415);
+  equal((await handler(request("{}", { "Content-Length": "22000001" }), session)).status, 413);
+  for (const invalid of ["null", "[]", '{"secret":"do not echo"', new Uint8Array([0xff])]) {
+    const response = await handler(request(invalid), session);
+    equal(response.status, 400);
+    assert(!(await response.text()).includes("do not echo"));
+  }
+  equal(calls, []);
+  const response = await handler(request(JSON.stringify({ action: "quota", owner: otherUser })), session);
+  equal(response.status, 500);
+  equal(response.headers.get("Cache-Control"), "no-store");
+  equal(await response.json(), { error: "データの読み込み・保存に失敗しました。" });
+  equal(calls, [{ p_owner: owner }]);
+});

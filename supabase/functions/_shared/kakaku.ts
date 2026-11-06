@@ -1,7 +1,8 @@
 import { parseHTML } from "npm:linkedom@0.18.14";
 import robotsParser from "npm:robots-parser@3.0.1";
-import { canonicalURL, safeURL, validateData } from "../../../docs/core.js";
+import { canonicalURL, productImageURL, safeURL, validateData } from "../../../docs/core.js";
 import { categoryURL, FALLBACK_LIMIT, inferredCategory, optionalCategory } from "../../../docs/fallback.js";
+import { RequestError } from "./request.ts";
 
 export const USER_AGENT = "PriceNoteTracker/1.0 (personal price comparison)";
 export class PriceError extends Error {
@@ -139,7 +140,7 @@ export function parseProduct(html: string, inputURL: string, maxShops = 20, sour
     : "";
   const metadata = {
     name,
-    image_url: safeURL(image) || null,
+    image_url: productImageURL(image) || null,
     category_url: specCategory(doc, url, specRows) ?? inferredCategory(
       chip || name + " " + String(selected[0]?.description ?? ""),
     ),
@@ -300,7 +301,9 @@ async function fetchKakakuHTML(
     robots = parseRobots("https://kakaku.com/robots.txt", raw);
   } catch (e) {
     throw new PriceError(
-      `robots.txtを確認できないため取得を停止しました。${e instanceof Error ? e.message : ""}`,
+      `robots.txtを確認できないため取得を停止しました。${
+        e instanceof PriceError || e instanceof RequestError ? e.message : ""
+      }`,
       true,
     );
   }

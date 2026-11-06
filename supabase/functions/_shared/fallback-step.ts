@@ -1,6 +1,7 @@
 import { validateData } from "../../../docs/core.js";
 import { FALLBACK_LIMIT } from "../../../docs/fallback.js";
 import { fetchCategory, fetchProduct, PriceError } from "./kakaku.ts";
+import { RequestError } from "./request.ts";
 
 // 候補を1件ずつ処理し、途中結果を既存ジョブのpayloadへ保存する。
 export async function advanceFallback(
@@ -22,7 +23,9 @@ export async function advanceFallback(
       if (pending.candidates.length) return { done: false, stopped: false };
     } catch (error) {
       stopped = error instanceof PriceError && error.blocked;
-      pending.reason = error instanceof Error ? error.message : "代替一覧を取得できませんでした。";
+      pending.reason = error instanceof PriceError || error instanceof RequestError
+        ? error.message
+        : "代替一覧を取得できませんでした。";
     }
   } else if (pending.index < pending.candidates.length) {
     const candidate = pending.candidates[pending.index++];
@@ -43,7 +46,9 @@ export async function advanceFallback(
     } catch (error) {
       pending.failed++;
       stopped = error instanceof PriceError && error.blocked;
-      pending.reason = error instanceof Error ? error.message : "代替商品の価格を取得できませんでした。";
+      pending.reason = error instanceof PriceError || error instanceof RequestError
+        ? error.message
+        : "代替商品の価格を取得できませんでした。";
     }
     if (!stopped && pending.index < pending.candidates.length) return { done: false, stopped: false };
   }
