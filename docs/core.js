@@ -169,12 +169,27 @@ export const lastSnapshot = (state) => state.snapshots.at(-1);
 export function latestCapture(state, pid) {
   return state.captures.findLast((c) => String(c.product_id) === String(pid));
 }
-export function minimum(capture, excluded = []) {
-  const blocked = new Set(excluded);
-  return (capture?.offers ?? []).filter((o) => !blocked.has(o.shop_key)).reduce(
-    (best, o) => !best || o.price < best.price ? o : best,
-    null,
-  );
+export function minimum(capture, excluded) {
+  const blocked = excluded instanceof Set ? excluded : excluded ? new Set(excluded) : null;
+  let best = null;
+  for (const offer of capture?.offers ?? []) {
+    if ((!best || offer.price < best.price) && !blocked?.has(offer.shop_key)) best = offer;
+  }
+  return best;
+}
+
+// A saved capture can appear in many snapshots. Reuse its prices within one calculation.
+export function offerLookup(excluded) {
+  const blocked = new Set(excluded), byCapture = new Map();
+  return (capture) => {
+    const known = byCapture.get(capture);
+    if (known) return known;
+    const raw = minimum(capture);
+    const filtered = raw && blocked.has(raw.shop_key) ? minimum(capture, blocked) : raw;
+    const offers = { raw, filtered };
+    byCapture.set(capture, offers);
+    return offers;
+  };
 }
 export function summary(values) {
   const known = values.filter((v) => typeof v === "number" && Number.isFinite(v));
@@ -189,21 +204,23 @@ export function summary(values) {
 export const displayAmount = (s) => s.total !== null ? s.total : s.known ? s.subtotal : null;
 export const yen = (value) =>
   typeof value === "number" && Number.isFinite(value) ? "¥" + value.toLocaleString("ja-JP") : "—";
-export const dateLabel = (value) => {
-  const d = new Date(value);
-  return value && Number.isFinite(+d)
-    ? new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(d)
-    : "未取得";
-};
+let jstDateFormatter;
+export function dateLabel(value) {
+  if (!value) return "未取得";
+  const date = new Date(value);
+  if (!Number.isFinite(+date)) return "未取得";
+  jstDateFormatter ??= new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  return jstDateFormatter.format(date);
+}
 export function comparableDelta(rows, current, reference) {
   const pairs = rows.filter((r) =>
     r[current] !== null && r[reference] !== null &&
@@ -248,14 +265,13 @@ export function priceView(state) {
 export function comparison(state, pastId = comparisonPoint(state)) {
   const captures = capMap(state), current = itemMap(lastSnapshot(state));
   const past = itemMap(state.snapshots.find((s) => String(s.id) === String(pastId)));
+  const offers = offerLookup(state.excluded);
   return activeProducts(state).map((p) => {
     const c = latestCapture(state, p.id), initial = captures.get(String(p.initial_capture_id));
     const old = past.get(String(p.id));
     const pc = pastId === INITIAL_POINT ? initial : captures.get(String(old?.capture_id));
-    const first = minimum(initial),
-      cheap = minimum(c),
-      previous = minimum(pc),
-      filtered = minimum(c, state.excluded);
+    const first = offers(initial).raw, previous = offers(pc).raw;
+    const { raw: cheap, filtered } = offers(c);
     return {
       id: p.id,
       name: p.name,
@@ -376,6 +392,7 @@ export function archiveProducts(input, ids) {
 }
 export function basketHistory(state, fixed = false) {
   const captures = capMap(state), membersFixed = activeProducts(state).map((p) => String(p.id)).sort();
+  const offers = offerLookup(state.excluded);
   let previous = null, rawSegment = 0, filteredSegment = 0;
   return state.snapshots.map((snapshot) => {
     const items = itemMap(snapshot), members = fixed ? membersFixed : [...items.keys()].sort();
@@ -384,13 +401,16 @@ export function basketHistory(state, fixed = false) {
     for (const pid of members) {
       const item = items.get(pid), capture = captures.get(String(item?.capture_id));
       const valid = capture && String(capture.product_id) === pid ? capture : null;
-      const a = minimum(valid), b = minimum(valid, state.excluded);
+      const { raw: a, filtered: b } = offers(valid);
       raw.push(a?.price ?? null);
       filtered.push(b?.price ?? null);
-      if (a) rawIds.push([pid, priceBasis(valid)]);
-      if (b) filteredIds.push([pid, priceBasis(valid)]);
-      if (a && valid.source === "fallback") estimates++;
-      if (a && ["error", "carried"].includes(item?.status)) carried++;
+      if (a) {
+        const basis = priceBasis(valid);
+        rawIds.push([pid, basis]);
+        if (b) filteredIds.push([pid, basis]);
+        if (valid.source === "fallback") estimates++;
+        if (item.status === "error" || item.status === "carried") carried++;
+      }
     }
     const signature = JSON.stringify(members),
       rawKey = signature + JSON.stringify(rawIds),

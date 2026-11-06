@@ -23,7 +23,7 @@ import {
   importBackup,
   INITIAL_POINT,
   makeDemo,
-  minimum,
+  offerLookup,
   priceView,
   productGroupIDs,
   productGroups,
@@ -31,7 +31,7 @@ import {
   shopList,
   summary,
   yen,
-} from "./core.js?v=multi-group";
+} from "./core.js?v=history-performance";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -415,29 +415,35 @@ function shell() {
   renderJob();
   renderContent();
 }
+const shopCatalogs = new WeakMap();
+function renderShopResults(list) {
+  let shops = shopCatalogs.get(state.captures);
+  if (!shops) {
+    shops = shopList(state).map((shop) => ({ ...shop, searchName: shop.name.toLowerCase() }));
+    shopCatalogs.set(state.captures, shops);
+  }
+  const query = shopSearch.toLowerCase(), excluded = new Set(state.excluded);
+  list.innerHTML =
+    shops.filter((s) => s.searchName.includes(query)).map((s) =>
+      `<label class="shop-check"><input type="checkbox" data-shop="${esc(s.key)}" ${
+        excluded.has(s.key) ? "checked" : ""
+      }><span title="${esc(s.name)}">${esc(s.name)}</span></label>`
+    ).join("") || '<p class="side-note">取得後にショップが表示されます。</p>';
+}
 function renderExclusions(target = "#exclusions") {
   const node = $(target);
   if (!node) return;
-  const shops = shopList(state),
-    filtered = shops.filter((s) => s.name.toLowerCase().includes(shopSearch.toLowerCase()));
   node.innerHTML =
     `<div class="exclude-title">除外するショップ <span class="count">${state.excluded.length}</span></div><input class="shop-search" aria-label="ショップを検索" placeholder="ショップ名で検索…" value="${
       esc(shopSearch)
-    }" data-shop-search><div class="shop-list">${
-      filtered.length
-        ? filtered.map((s) =>
-          `<label class="shop-check"><input type="checkbox" data-shop="${esc(s.key)}" ${
-            state.excluded.includes(s.key) ? "checked" : ""
-          }><span title="${esc(s.name)}">${esc(s.name)}</span></label>`
-        ).join("")
-        : '<p class="side-note">取得後にショップが表示されます。</p>'
-    }</div>${
+    }" data-shop-search><div class="shop-list"></div>${
       target === "#manage-exclusions"
         ? ""
         : '<p class="side-note">チェックしたショップを計算から除外します。切り替えると総額も変わります。</p>'
     }<button class="ghost small-button" data-action="clear-excluded" ${
       state.excluded.length ? "" : "hidden"
     }>除外をすべて解除</button>`;
+  renderShopResults(node.querySelector(".shop-list"));
 }
 function preserveScroll(render) {
   const x = window.scrollX, y = window.scrollY;
@@ -460,10 +466,11 @@ function preserveScroll(render) {
 function refreshExcluded() {
   const focused = document.activeElement, focusedShop = focused?.dataset.shop;
   preserveScroll(() => {
-    // 除外後の価格を描画し直しても、入力中の代替条件は保持する。
-    const fallbackForm = $("#content [data-fallback-product]");
-    if (tab !== "manage") renderContent();
-    if (fallbackForm) $("#content [data-fallback-product]")?.replaceWith(fallbackForm);
+    if (
+      tab === "compare" || tab === "history" || tab === "product" && sectionSelection.product === "history"
+    ) {
+      renderContent();
+    }
     const excluded = new Set(state.excluded);
     for (const input of document.querySelectorAll("[data-shop]")) {
       input.checked = excluded.has(input.dataset.shop);
@@ -619,8 +626,17 @@ function snapshotSelect() {
     ).join("")
   }</select>`;
 }
+function comparisonView(recentCount = 1) {
+  const snapshots = state.snapshots.slice(-recentCount);
+  if (pastId !== INITIAL_POINT && !snapshots.some((snapshot) => snapshot.id === pastId)) {
+    const selected = state.snapshots.find((snapshot) => snapshot.id === pastId);
+    if (selected) snapshots.unshift(selected);
+  }
+  return priceView(groupView({ ...state, snapshots }, groupID));
+}
 function renderCompare() {
-  const view = priceView(groupView(state, groupID));
+  const previewCount = 30;
+  const view = comparisonView(previewCount);
   const rows = comparison(view, pastId),
     sums = ["past", "current", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
     pastDiff = comparableDelta(rows, "current", "past");
@@ -719,7 +735,7 @@ function renderCompare() {
   }</section>${
     state.snapshots.length > 1
       ? `<section class="panel"><div class="panel-header"><div><h2>総額の動き</h2><p data-explanation>現在の登録商品で比較 · 除外設定は過去分にも適用</p></div><button class="ghost small-button" data-tab="history">履歴をすべて見る →</button></div>${
-        chart(basketHistory(view, true).slice(-30))
+        chart(basketHistory({ ...view, snapshots: view.snapshots.slice(-previewCount) }, true))
       }<div class="legend"><span><i></i>最安価格の合計</span><span><i class="gold"></i>ショップ除外後</span></div></section>`
       : ""
   }`;
@@ -751,6 +767,7 @@ function chart(records, label = "保存時点ごとの総額推移") {
     low = Math.max(0, min - padding),
     high = max + padding;
   const times = rows.map((r) => +new Date(r.date)), start = Math.min(...times), end = Math.max(...times);
+  const dates = rows.map((r) => esc(dateLabel(r.date)));
   const x = (i) =>
       left +
       (start === end
@@ -789,7 +806,7 @@ function chart(records, label = "保存時点ごとの総額推移") {
       }
       svg += `<circle cx="${xx}" cy="${yy}" r="3.5" fill="${r.estimate ? "#fff" : color}" stroke="${
         r.estimate ? color : "#fff"
-      }" stroke-width="1.5"><title>${esc(dateLabel(r.date))}：${esc(yen(r[key]))}${
+      }" stroke-width="1.5"><title>${dates[i]}：${esc(yen(r[key]))}${
         r[summaryKey].total === null ? "（小計）" : ""
       }${r.note ? `（${esc(r.note)}）` : ""}</title></circle>`;
       previous = { r, x: xx, y: yy };
@@ -797,9 +814,7 @@ function chart(records, label = "保存時点ごとの総額推移") {
   }
   const ticks = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
   for (const i of ticks) {
-    svg += `<text x="${x(i)}" y="${height - 14}" text-anchor="middle">${
-      esc(dateLabel(rows[i].date).slice(0, 10))
-    }</text>`;
+    svg += `<text x="${x(i)}" y="${height - 14}" text-anchor="middle">${dates[i].slice(0, 10)}</text>`;
   }
   return `<div class="chart-wrap">${svg}</svg></div>`;
 }
@@ -851,42 +866,30 @@ function productSelect(products, location, label) {
   }</select></label>`;
 }
 function renderProduct() {
-  const view = priceView(state);
-  const products = visibleProducts(),
-    p = products.find((p) => p.id === selectedProduct),
-    cm = capMap(view),
-    row = comparison(view, pastId).find((r) => r.id === selectedProduct);
+  const products = visibleProducts(), p = products.find((p) => p.id === selectedProduct);
   if (!p) {
     $("#content").innerHTML = `<section class="panel">${emptyView()}</section>`;
     return;
   }
-  const captures = view.captures.filter((c) => c.product_id === p.id), capture = captures.at(-1);
-  const records = view.snapshots.flatMap((snapshot) => {
-    const item = snapshot.items.find((entry) => String(entry.product_id) === String(p.id));
-    if (!item) return [];
-    const saved = cm.get(String(item.capture_id));
-    const value = minimum(saved)?.price ?? null;
-    const filteredValue = minimum(saved, state.excluded)?.price ?? null;
-    const estimate = saved?.source === "fallback";
-    const carried = saved && ["carried", "error"].includes(item.status);
-    const note = [estimate ? "代替参考価格" : "", carried ? "前回価格の引継ぎ" : ""].filter(Boolean).join(
-      "・",
-    );
-    const basis = priceBasis(saved);
-    return [{
-      date: snapshot.completed_at,
-      item,
-      saved,
-      value,
-      filteredValue,
-      estimate,
-      note,
-      rawSegment: basis,
-      filteredSegment: basis,
-      raw: { total: value },
-      filtered: { total: filteredValue },
-    }];
+  const section = sectionSelection.product, pid = String(p.id);
+  const snapshots = section === "history"
+    ? state.snapshots.flatMap((snapshot) => {
+      const item = snapshot.items.find((entry) => String(entry.product_id) === pid);
+      return item ? [{ ...snapshot, items: [item] }] : [];
+    })
+    : [];
+  const view = priceView({
+    ...state,
+    captures: state.captures.filter((capture) => String(capture.product_id) === pid),
+    snapshots,
   });
+  const capture = view.captures.at(-1);
+  const error = state.snapshots.at(-1)?.items.findLast((item) => String(item.product_id) === pid)?.error;
+  const renderSection = {
+    history: () => productHistory(view),
+    shops: () => productOffers(capture),
+    fallback: () => productFallbackSettings(products, p),
+  };
   $("#content").innerHTML =
     `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body">${
       productSelect(products, "history", "履歴を見る商品")
@@ -901,14 +904,14 @@ function renderProduct() {
     }>グループを移動</button></div><p class="help">価格を取得した日時：${
       esc(dateLabel(capture?.fetched_at))
     } / 初回登録：${esc(dateLabel(p.created_at))}</p>${
-      row?.error
+      error
         ? `<div class="banner warning">${
           capture?.source === "fallback"
             ? "登録商品の価格を取得できないため、代替参考価格を使用しています。"
             : capture
             ? "最後に取得できた価格を使用しています。"
             : "まだ価格を取得できていません。"
-        }<br>${esc(row.error)}</div>`
+        }<br>${esc(error)}</div>`
         : ""
     }${
       capture?.source === "fallback"
@@ -920,50 +923,89 @@ function renderProduct() {
           esc(capture.fallback.search_url)
         }" target="_blank" rel="noopener noreferrer">検索条件を開く ↗</a></div>`
         : ""
-    }</div></section><section class="panel section-space" data-page-section="history"><div class="panel-header"><div><h2>この商品の価格推移</h2><p data-explanation>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
-      chart(records, "保存時点ごとの商品価格推移")
-    }<div class="legend"><span><i></i>最安価格</span><span><i class="gold"></i>ショップ除外後</span><span>白抜きの点・破線：代替参考価格</span></div></section><div class="details-grid"><section class="panel" data-page-section="shops"><div class="panel-header"><h2>${
-      capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
-    }</h2><span class="count">${
-      capture?.offers.length ?? 0
-    } ショップ</span></div><div class="table-scroll"><table><thead><tr><th>除外</th><th>ショップ</th><th class="numeric">価格</th><th>送料・在庫</th></tr></thead><tbody>${
-      (capture?.offers ?? []).map((o) =>
-        `<tr class="shop-offer ${
-          state.excluded.includes(o.shop_key) ? "excluded" : ""
-        }"><td><input aria-label="${esc(o.shop_name)}を除外" type="checkbox" data-shop="${esc(o.shop_key)}" ${
-          state.excluded.includes(o.shop_key) ? "checked" : ""
-        }></td><td>${
-          o.shop_url
-            ? `<a href="${esc(safeURL(o.shop_url))}" target="_blank" rel="noopener noreferrer">${
-              esc(o.shop_name)
-            }</a>`
-            : esc(o.shop_name)
-        }${alternative(o)}${
-          o.product_fetched_at ? `<div class="price-small">${esc(dateLabel(o.product_fetched_at))}</div>` : ""
-        }</td><td class="numeric">${yen(o.price)}</td><td><small>${esc(o.shipping_text)} ${
-          esc(o.stock_text)
-        }</small></td></tr>`
-      ).join("") || '<tr><td colspan="4">店舗別価格はまだありません。</td></tr>'
-    }</tbody></table></div></section><section class="panel" data-page-section="history"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
-      [...records].reverse().map(({ date, item, saved: c, value, filteredValue }) =>
-        `<tr><td><small>${esc(dateLabel(date))}</small></td><td class="numeric">${
-          yen(value)
-        }</td><td class="numeric">${yen(filteredValue)}</td><td><span class="tag ${
-          item.status === "error" ? "warn" : ""
-        }">${
-          c?.source === "fallback" ? `代替参考価格${item.status === "error" ? "・前回" : ""}` : {
-            fresh: "取得",
-            carried: "引継ぎ",
-            missing: "未取得",
-            error: c ? "前回価格" : "未取得",
-          }[item.status]
-        }</span></td></tr>`
-      ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
-    }</tbody></table></div></section></div><section class="panel section-space" data-page-section="fallback"><div class="panel-header"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3></div><div class="panel-body">${
-      productSelect(products, "fallback", "代替条件を設定する商品")
-    }${fallbackSettings(p)}<button class="small-button section-space" data-action="bulk-fallback" ${
-      job ? "disabled" : ""
-    }>複数商品の代替条件を設定</button></div></section>`;
+    }</div></section>${
+      pageSections.product.map(([id]) =>
+        id === section ? renderSection[id]() : `<div data-page-section="${id}"></div>`
+      ).join("")
+    }`;
+}
+function productOffers(capture) {
+  const excluded = new Set(state.excluded);
+  return `<section class="panel" data-page-section="shops"><div class="panel-header"><h2>${
+    capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
+  }</h2><span class="count">${
+    capture?.offers.length ?? 0
+  } ショップ</span></div><div class="table-scroll"><table><thead><tr><th>除外</th><th>ショップ</th><th class="numeric">価格</th><th>送料・在庫</th></tr></thead><tbody>${
+    (capture?.offers ?? []).map((o) =>
+      `<tr class="shop-offer ${excluded.has(o.shop_key) ? "excluded" : ""}"><td><input aria-label="${
+        esc(o.shop_name)
+      }を除外" type="checkbox" data-shop="${esc(o.shop_key)}" ${
+        excluded.has(o.shop_key) ? "checked" : ""
+      }></td><td>${
+        o.shop_url
+          ? `<a href="${esc(safeURL(o.shop_url))}" target="_blank" rel="noopener noreferrer">${
+            esc(o.shop_name)
+          }</a>`
+          : esc(o.shop_name)
+      }${alternative(o)}${
+        o.product_fetched_at ? `<div class="price-small">${esc(dateLabel(o.product_fetched_at))}</div>` : ""
+      }</td><td class="numeric">${yen(o.price)}</td><td><small>${esc(o.shipping_text)} ${
+        esc(o.stock_text)
+      }</small></td></tr>`
+    ).join("") || '<tr><td colspan="4">店舗別価格はまだありません。</td></tr>'
+  }</tbody></table></div></section>`;
+}
+function productHistory(view) {
+  const captures = capMap(view), offers = offerLookup(view.excluded);
+  const records = view.snapshots.map(({ completed_at, items: [item] }) => {
+    const saved = captures.get(String(item.capture_id));
+    const { raw, filtered } = offers(saved);
+    const value = raw?.price ?? null, filteredValue = filtered?.price ?? null;
+    const estimate = saved?.source === "fallback";
+    const carried = saved && ["carried", "error"].includes(item.status);
+    const note = [estimate ? "代替参考価格" : "", carried ? "前回価格の引継ぎ" : ""].filter(Boolean).join(
+      "・",
+    );
+    const basis = priceBasis(saved);
+    return {
+      date: completed_at,
+      item,
+      saved,
+      value,
+      filteredValue,
+      estimate,
+      note,
+      rawSegment: basis,
+      filteredSegment: basis,
+      raw: { total: value },
+      filtered: { total: filteredValue },
+    };
+  });
+  return `<section class="panel section-space" data-page-section="history"><div class="panel-header"><div><h2>この商品の価格推移</h2><p data-explanation>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
+    chart(records, "保存時点ごとの商品価格推移")
+  }<div class="legend"><span><i></i>最安価格</span><span><i class="gold"></i>ショップ除外後</span><span>白抜きの点・破線：代替参考価格</span></div></section><section class="panel" data-page-section="history"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
+    [...records].reverse().map(({ date, item, saved: c, value, filteredValue }) =>
+      `<tr><td><small>${esc(dateLabel(date))}</small></td><td class="numeric">${
+        yen(value)
+      }</td><td class="numeric">${yen(filteredValue)}</td><td><span class="tag ${
+        item.status === "error" ? "warn" : ""
+      }">${
+        c?.source === "fallback" ? `代替参考価格${item.status === "error" ? "・前回" : ""}` : {
+          fresh: "取得",
+          carried: "引継ぎ",
+          missing: "未取得",
+          error: c ? "前回価格" : "未取得",
+        }[item.status]
+      }</span></td></tr>`
+    ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
+  }</tbody></table></div></section>`;
+}
+function productFallbackSettings(products, p) {
+  return `<section class="panel section-space" data-page-section="fallback"><div class="panel-header"><h3 id="product-fallback-settings" tabindex="-1">代替価格の条件</h3></div><div class="panel-body">${
+    productSelect(products, "fallback", "代替条件を設定する商品")
+  }${fallbackSettings(p)}<button class="small-button section-space" data-action="bulk-fallback" ${
+    job ? "disabled" : ""
+  }>複数商品の代替条件を設定</button></div></section>`;
 }
 function showDeletionStatus(panel, status) {
   panel.innerHTML = status.delete_at
@@ -1005,12 +1047,13 @@ function renderManage() {
     }</div><button class="danger section-space" type="submit" ${
       job || !visibleProducts().length ? "disabled" : ""
     }>選択した商品を削除</button></form></div></section></div><p class="help section-space" data-page-section="pricing" data-explanation="pricing">自動更新と手動更新の価格・総額を記録します。現在の登録上限は100商品です。価格の取得元の仕様変更やアクセス制限によって、自動取得できない場合があります。</p>`;
-  renderExclusions("#manage-exclusions");
+  if (sectionSelection.manage === "shops") renderExclusions("#manage-exclusions");
   if (!demo) {
     $("#content .details-grid").insertAdjacentHTML(
       "beforeend",
       '<section class="panel" data-page-section="account"><div class="panel-header"><h2>アカウント</h2></div><div class="panel-body" id="account-deletion"><p class="help">削除予約の状態を読み込んでいます…</p></div></section>',
     );
+    if (sectionSelection.manage !== "account") return;
     const panel = $("#account-deletion");
     api("account-deletion", { operation: "status" }).then((status) => {
       if (panel.isConnected) showDeletionStatus(panel, status);
@@ -1100,22 +1143,24 @@ function updateSharePreview() {
   $(`[data-action="share-copy-link"]`).disabled = !link;
 }
 function showSnapshot(id) {
-  const view = priceView(groupView(state, groupID));
-  const s = view.snapshots.find((s) => s.id === id), cm = capMap(view);
-  if (!s) return;
+  const snapshot = state.snapshots.find((s) => s.id === id);
+  if (!snapshot) return;
+  const view = priceView(groupView({ ...state, snapshots: [snapshot] }, groupID));
+  const [s] = view.snapshots, cm = capMap(view), offers = offerLookup(state.excluded);
   modal(
     `<h2>保存時点の内訳</h2><p>${esc(dateLabel(s.completed_at))} · ${
       kindName(s.kind)
     }</p><div class="table-scroll section-space"><table><thead><tr><th>当時の商品</th><th class="numeric">最安価格</th><th class="numeric">除外後</th></tr></thead><tbody>${
       s.items.map((i) => {
         const c = cm.get(i.capture_id), p = view.products.find((p) => p.id === i.product_id);
+        const { raw, filtered } = offers(c);
         return `<tr><td><span class="product-name">${esc(c?.name ?? p?.name ?? "商品")}</span><br><small>${
           esc(dateLabel(c?.fetched_at))
         }${c?.source === "fallback" ? " · 代替参考価格" : ""}${
           ["carried", "error"].includes(i.status) ? " · 前回価格" : ""
-        }</small>${alternative(minimum(c))}</td><td class="numeric">${
-          yen(minimum(c)?.price)
-        }</td><td class="numeric">${yen(minimum(c, state.excluded)?.price)}</td></tr>`;
+        }</small>${alternative(raw)}</td><td class="numeric">${yen(raw?.price)}</td><td class="numeric">${
+          yen(filtered?.price)
+        }</td></tr>`;
       }).join("")
     }</tbody></table></div><p class="help">当時登録されていた商品と、その保存時点が参照した価格を表示しています。</p><div class="actions"><button data-close>閉じる</button></div>`,
   );
@@ -1424,7 +1469,7 @@ async function action(name) {
     download(
       "price-comparison.csv",
       csv(
-        comparison(priceView(groupView(state, groupID)), pastId).map((r) => ({
+        comparison(comparisonView(), pastId).map((r) => ({
           商品名: r.name,
           URL: r.url,
           初回価格: r.initial,
@@ -1545,12 +1590,7 @@ document.addEventListener("input", (event) => {
   const node = event.target;
   if (node.hasAttribute("data-shop-search")) {
     shopSearch = node.value;
-    const target = node.parentElement;
-    const selection = node.selectionStart;
-    renderExclusions(`#${target.id}`);
-    const replacement = target.querySelector("input");
-    replacement.focus();
-    replacement.setSelectionRange(selection, selection);
+    renderShopResults(node.parentElement.querySelector(".shop-list"));
   }
 });
 document.addEventListener("change", (event) => {
