@@ -27,6 +27,7 @@ import {
   priceView,
   productGroupIDs,
   productGroups,
+  productImageURL,
   safeURL,
   shopList,
   summary,
@@ -889,15 +890,23 @@ function renderHistory() {
     ).join("") || '<tr><td colspan="7">まだ価格の記録がありません。</td></tr>'
   }</tbody></table></div><p class="help" data-explanation>過去の除外後総額も、現在チェックしているショップを除外して再計算します。当時未取得の商品には未来の価格を補いません。</p></section>`;
 }
-function productSelect(products, location, label, selectedID) {
-  return `<label class="field">${label}<select data-product-select="${location}">${
+function fallbackProductSelect(products, selectedID) {
+  return `<label class="field">代替条件を設定する商品<select data-product-select="fallback">${
     products.map((p) =>
       `<option value="${esc(p.id)}" ${p.id === selectedID ? "selected" : ""}>${esc(p.name)}</option>`
     ).join("")
   }</select></label>`;
 }
+function historyProductThumbnail(product) {
+  const url = productImageURL(product.image_url);
+  return `<span class="history-product-thumbnail" aria-hidden="true"><span class="product-image product-placeholder">◇</span>${
+    url
+      ? `<img class="product-image" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-history-product-image>`
+      : ""
+  }</span>`;
+}
 function renderProduct() {
-  const products = visibleProducts(), p = products.find((p) => p.id === selectedProduct);
+  const p = visibleProducts().find((p) => p.id === selectedProduct);
   if (!p) {
     $("#content").innerHTML = `<section class="panel">${emptyView()}</section>`;
     return;
@@ -921,9 +930,9 @@ function renderProduct() {
     shops: () => productOffers(capture),
   };
   $("#content").innerHTML =
-    `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body">${
-      productSelect(products, "history", "履歴を見る商品", selectedProduct)
-    }<a class="product-name" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${
+    `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body"><div class="field history-product-field"><span id="history-product-label">履歴を見る商品</span><button type="button" class="history-product-button" data-action="pick-history-product" aria-haspopup="dialog" aria-labelledby="history-product-label history-product-name">${
+      historyProductThumbnail(p)
+    }<span id="history-product-name">${esc(p.name)}</span></button></div><a class="product-name" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${
       esc(p.name)
     } ↗</a><div class="row section-space"><span class="count">${
       esc(
@@ -1038,7 +1047,7 @@ function productFallbackSettings(products) {
     state.settings.fallback_enabled !== false ? "checked" : ""
   }>代替参考価格を使う</label></div><p class="help" data-explanation="fallback">OFFにして保存すると、全商品の代替参考価格の取得と表示を停止します。登録商品の最後に取得できた実価格を表示し、実価格がなければ未取得として扱います。商品ごとの代替条件は保持します。</p><button type="submit" class="primary section-space">全体設定を保存</button></form><hr>${
     product
-      ? `${productSelect(products, "fallback", "代替条件を設定する商品", selectedFallbackProduct)}${
+      ? `${fallbackProductSelect(products, selectedFallbackProduct)}${
         fallbackSettings(product)
       }<button class="small-button section-space" data-action="bulk-fallback" ${
         job ? "disabled" : ""
@@ -1257,6 +1266,20 @@ function productCheckboxes(products, selectedID) {
   }</div></fieldset>`;
 }
 async function action(name) {
+  if (name === "pick-history-product") {
+    modal(
+      `<h2 id="history-product-dialog-title">履歴を見る商品</h2><ul class="history-product-options">${
+        visibleProducts().map((product) =>
+          `<li><button type="button" data-history-product="${esc(product.id)}" ${
+            product.id === selectedProduct ? 'aria-current="true" autofocus' : ""
+          }>${historyProductThumbnail(product)}<span>${esc(product.name)}</span></button></li>`
+        ).join("")
+      }</ul><div class="actions"><button type="button" data-close>閉じる</button></div>`,
+      "",
+      "history-product-dialog-title",
+    );
+    return;
+  }
   if (name === "group-move") {
     if (job) return;
     modal(
@@ -1620,6 +1643,16 @@ document.addEventListener("click", (event) => {
     navigateTab(target.dataset.tab, destination);
     return;
   }
+  if (target.dataset.historyProduct) {
+    const productID = target.dataset.historyProduct;
+    $("#modal").close();
+    if (productID !== selectedProduct && visibleProducts().some((product) => product.id === productID)) {
+      selectedProduct = productID;
+      preserveScroll(renderContent);
+    }
+    $(".history-product-button")?.focus({ preventScroll: true });
+    return;
+  }
   if (target.dataset.product) {
     selectedProduct = target.dataset.product;
     sectionSelection.product = "history";
@@ -1645,6 +1678,10 @@ document.addEventListener("click", (event) => {
     });
   }
 });
+document.addEventListener("error", (event) => {
+  const image = event.target;
+  if (image instanceof HTMLImageElement && image.hasAttribute("data-history-product-image")) image.remove();
+}, true);
 document.addEventListener("keydown", (event) => {
   const current = event.target.closest("[data-section-tab]");
   if (!current || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -1719,25 +1756,18 @@ document.addEventListener("change", (event) => {
     $("[data-past]")?.focus();
     flushPrefs().catch((e) => notify(`比較時点を保存できませんでした。${e.message}`, true));
   }
-  if (node.hasAttribute("data-product-select")) {
-    const location = node.dataset.productSelect, top = node.getBoundingClientRect().top;
-    const nextProduct = node.value;
-    const selectProduct = () => {
-      if (location === "fallback") selectedFallbackProduct = nextProduct;
-      else selectedProduct = nextProduct;
+  if (node.matches('[data-product-select="fallback"]')) {
+    const nextProduct = node.value, top = node.getBoundingClientRect().top;
+    node.value = selectedFallbackProduct;
+    confirmSettingsNavigation(() => {
+      selectedFallbackProduct = nextProduct;
       preserveScroll(renderContent);
-      const replacement = $(`[data-product-select="${location}"]`);
+      const replacement = $('[data-product-select="fallback"]');
       if (replacement) {
         window.scrollBy({ top: replacement.getBoundingClientRect().top - top, behavior: "instant" });
         replacement.focus({ preventScroll: true });
       }
-    };
-    if (location === "fallback") {
-      node.value = selectedFallbackProduct;
-      confirmSettingsNavigation(selectProduct);
-    } else {
-      selectProduct();
-    }
+    });
   }
   if (node.hasAttribute("data-scope")) {
     fixed = node.value === "fixed";

@@ -989,6 +989,54 @@ th.numeric {
   color: var(--quiet);
   font-size: 20px;
 }
+.history-product-field {
+  font-size: 14px;
+}
+.history-product-button,
+.history-product-options button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.history-product-button:hover,
+.history-product-options button:hover {
+  background: #eef4fb;
+}
+.history-product-button::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: none;
+  margin-inline-start: auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+.history-product-thumbnail {
+  display: grid;
+  flex: none;
+}
+.history-product-thumbnail > * {
+  grid-area: 1 / 1;
+}
+.history-product-options {
+  display: grid;
+  gap: 8px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  margin: 0;
+  padding: 5px;
+  list-style: none;
+}
+.history-product-options button[aria-current="true"] {
+  color: var(--selection-blue);
+  border-color: var(--selection-blue);
+  background: #eef4fb;
+}
 .product-name {
   font-size: 14px;
   font-weight: 600;
