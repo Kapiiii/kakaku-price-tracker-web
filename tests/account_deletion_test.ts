@@ -15,7 +15,9 @@ Deno.test("account deletion is owner-scoped, cancelable before 30 days, and casc
       create schema cron;
       create function cron.schedule(text,text,text) returns bigint language sql as $$ select 1::bigint $$;
     `);
-    for (const filename of ["202611020001_tracker.sql", "20261103095511_account_deletion.sql"]) {
+    for (
+      const filename of ["20261101232825_price_tracker_initial.sql", "20261103095704_account_deletion.sql"]
+    ) {
       await db.exec(await Deno.readTextFile(new URL("../supabase/migrations/" + filename, import.meta.url)));
     }
     const alice = crypto.randomUUID(), bob = crypto.randomUUID();

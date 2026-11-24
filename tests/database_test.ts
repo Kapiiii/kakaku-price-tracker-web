@@ -10,12 +10,14 @@ Deno.test("real PostgreSQL: RLS, RPC privileges, atomic jobs, last success and u
       `create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema public,auth to anon,authenticated,service_role; grant execute on function auth.uid() to authenticated;`,
     );
     await db.exec(
-      await Deno.readTextFile(new URL("../supabase/migrations/202611020001_tracker.sql", import.meta.url)),
+      await Deno.readTextFile(
+        new URL("../supabase/migrations/20261101232825_price_tracker_initial.sql", import.meta.url),
+      ),
     );
     await db.exec("alter table public.tracker_jobs add column origin text not null default 'manual';");
     await db.exec(
       await Deno.readTextFile(
-        new URL("../supabase/migrations/20261102040752_manual_update_daily_limit.sql", import.meta.url),
+        new URL("../supabase/migrations/20261102041900_manual_update_daily_limit.sql", import.meta.url),
       ),
     );
     const alice = crypto.randomUUID(), bob = crypto.randomUUID();

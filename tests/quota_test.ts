@@ -11,11 +11,13 @@ Deno.test("manual quota: two starts per user/JST day, durable cancellation/failu
       create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
       grant usage on schema public,auth to anon,authenticated,service_role;`);
     await db.exec(
-      await Deno.readTextFile(new URL("../supabase/migrations/202611020001_tracker.sql", import.meta.url)),
+      await Deno.readTextFile(
+        new URL("../supabase/migrations/20261101232825_price_tracker_initial.sql", import.meta.url),
+      ),
     );
     await db.exec("alter table public.tracker_jobs add column origin text not null default 'manual';");
     const migration = await Deno.readTextFile(
-      new URL("../supabase/migrations/20261102040752_manual_update_daily_limit.sql", import.meta.url),
+      new URL("../supabase/migrations/20261102041900_manual_update_daily_limit.sql", import.meta.url),
     );
     await db.exec(migration);
     const admin = {

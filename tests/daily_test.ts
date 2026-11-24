@@ -32,21 +32,23 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       create table cron.job_run_details(jobid bigint,end_time timestamptz);
       create function cron.schedule(name text,schedule text,command text) returns bigint language sql as $$insert into cron.job(jobname,schedule,command) values(name,schedule,command) on conflict(jobname) do update set schedule=excluded.schedule,command=excluded.command returning jobid;$$;`);
     await db.exec(
-      await Deno.readTextFile(new URL("../supabase/migrations/202611020001_tracker.sql", import.meta.url)),
-    );
-    await db.exec(
       await Deno.readTextFile(
-        new URL("../supabase/migrations/20261102000207_daily_price_updates.sql", import.meta.url),
+        new URL("../supabase/migrations/20261101232825_price_tracker_initial.sql", import.meta.url),
       ),
     );
     await db.exec(
       await Deno.readTextFile(
-        new URL("../supabase/migrations/20261102001605_daily_gateway_auth.sql", import.meta.url),
+        new URL("../supabase/migrations/20261102001407_daily_price_updates.sql", import.meta.url),
       ),
     );
     await db.exec(
       await Deno.readTextFile(
-        new URL("../supabase/migrations/20261102040752_manual_update_daily_limit.sql", import.meta.url),
+        new URL("../supabase/migrations/20261102001800_daily_gateway_auth.sql", import.meta.url),
+      ),
+    );
+    await db.exec(
+      await Deno.readTextFile(
+        new URL("../supabase/migrations/20261102041900_manual_update_daily_limit.sql", import.meta.url),
       ),
     );
     const setup = (await Deno.readTextFile(new URL("../tools/enable_daily.sql", import.meta.url))).replace(
@@ -63,8 +65,8 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
     await db.query("update vault.secrets set secret=$1 where name='price_note_daily_key'", [token]);
     for (
       const migration of [
-        "20261103095511_account_deletion.sql",
-        "20261106143114_restrict_tracker_and_scheduler_access.sql",
+        "20261103095704_account_deletion.sql",
+        "20261106144459_restrict_tracker_and_scheduler_access.sql",
       ]
     ) {
       await db.exec(await Deno.readTextFile(new URL(`../supabase/migrations/${migration}`, import.meta.url)));
