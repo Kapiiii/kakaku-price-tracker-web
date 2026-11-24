@@ -3,21 +3,21 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#17665a">
+    <meta name="theme-color" content="#fafafa">
     <meta name="referrer" content="no-referrer">
     <meta name="description" content="欲しいものの価格と、買い物リストの総額を記録する価格追跡ノート。">
     <meta http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://kakaku.com https://*.kakaku.com https://kakaku.k-img.com https://*.kakaku.k-img.com; connect-src 'self' https://nicgbsemqltpxyvyoslk.supabase.co wss://nicgbsemqltpxyvyoslk.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
     <title>PRICE NOTE｜価格追跡・見積もり管理</title>
-    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="icon" href="./icon.png" type="image/png" sizes="512x512">
     <link rel="stylesheet" href="./fonts/noto-sans-jp-5.3.1/wght.css">
-    <link rel="stylesheet" href="./styles.css?v=noto-sans-jp">
-    <script type="module" src="./app.js?v=input-validation"></script>
+    <link rel="stylesheet" href="./styles.css?v=fixed-menu">
+    <script type="module" src="./app.js?v=fixed-menu"></script>
   </head>
   <body>
     <div id="app">
       <div class="boot"
-        role="status"><span class="brand-mark">P<span>↘</span></span><p>PRICE NOTE を開いています…</p></div>
+        role="status"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><p>PRICE NOTE を開いています…</p></div>
     </div>
     <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
     <dialog id="modal"></dialog>

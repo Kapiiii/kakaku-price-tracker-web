@@ -17,7 +17,7 @@ function render() {
   try {
     items = readShareHash(location.hash);
     $("#shared-content").innerHTML =
-      `<section class="share-intro"><span class="eyebrow">Shared product list</span><h1>共有された商品URLリスト</h1><p>${items.length}件の商品 · ログインせずに閲覧できます。</p></section><section class="panel"><div class="panel-header"><div><h2>商品一覧 <span class="count">${items.length}</span></h2><p>リンクを押すと、価格.comの商品ページが開きます。</p></div><button class="primary" data-copy>URLリストをコピー</button></div><ol class="shared-products">${
+      `<section class="share-intro"><h1>共有された商品URLリスト</h1><p>${items.length}件の商品 · ログインせずに閲覧できます。</p></section><section class="panel"><div class="panel-header"><div><h2>商品一覧 <span class="count">${items.length}</span></h2><p>リンクを押すと、価格.comの商品ページが開きます。</p></div><button class="primary" data-copy>URLリストをコピー</button></div><ol class="shared-products">${
         items.map((item, index) =>
           `<li><span class="shared-index">${
             String(index + 1).padStart(2, "0")
@@ -32,7 +32,7 @@ function render() {
   } catch (error) {
     items = [];
     $("#shared-content").innerHTML =
-      `<section class="panel share-error"><span class="eyebrow">Shared product list</span><h1>共有リストを開けませんでした</h1><p class="help">${
+      `<section class="panel share-error"><h1>共有リストを開けませんでした</h1><p class="help">${
         esc(error.message)
       }</p><a href="./">PRICE NOTEを開く →</a></section>`;
   }
