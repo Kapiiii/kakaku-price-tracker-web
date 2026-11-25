@@ -11,15 +11,93 @@
     <title>PRICE NOTE｜価格追跡・見積もり管理</title>
     <link rel="icon" href="./icon.png" type="image/png" sizes="512x512">
     <link rel="stylesheet" href="./fonts/noto-sans-jp-5.3.1/wght.css">
-    <link rel="stylesheet" href="./styles.css?v=security-hardening">
-    <script type="module" async src="./page-entry.js?v=performance"></script>
+    <link rel="stylesheet" href="./styles.css?v=skeleton-ui">
+    <script type="module" async src="./page-entry.js?v=skeleton-ui"></script>
   </head>
   <body data-page="tracker">
     <div id="standalone" hidden>
       <div id="app">
-        <div class="boot"
-          role="status"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><p>PRICE NOTE を開いています…</p></div>
+        <div class="skeleton-screen" data-loading="landing" role="status">
+          <span class="skeleton-status">PRICE NOTEを開いています</span>
+          <div class="login skeleton-art" aria-hidden="true">
+            <div class="login-story">
+              <div class="brand">
+                <span class="skeleton-block skeleton-logo"></span>
+                <div class="skeleton-text skeleton-brand-text"><span></span><span></span></div>
+              </div>
+              <div>
+                <div class="skeleton-hero skeleton-text"><span></span><span></span></div>
+                <div class="skeleton-text skeleton-intro"><span></span><span></span></div>
+                <div class="feature-carousel">
+                  <div class="skeleton-block skeleton-feature-label"></div>
+                  <div class="skeleton-block skeleton-feature-preview"></div>
+                  <div class="skeleton-feature-controls"><span></span><span></span><span></span></div>
+                </div>
+              </div>
+              <footer><span class="skeleton-block skeleton-footer"></span></footer>
+            </div>
+            <div class="login-action">
+              <div class="login-box skeleton-form">
+                <span class="skeleton-block skeleton-form-title"></span>
+                <div class="skeleton-text"><span></span><span></span></div>
+                <span class="skeleton-block skeleton-form-button"></span>
+                <span class="skeleton-block skeleton-form-button"></span>
+                <div class="skeleton-text"><span></span><span></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+      <template id="workspace-skeleton">
+        <div class="skeleton-screen" data-loading="workspace" role="status">
+          <span class="skeleton-status">価格ノートを読み込んでいます</span>
+          <div class="app-shell skeleton-art" aria-hidden="true">
+            <div class="workspace-nav skeleton-nav"><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="workspace">
+              <div class="topbar">
+                <div class="brand">
+                  <span class="skeleton-block skeleton-logo"></span>
+                  <div class="skeleton-text skeleton-brand-text"><span></span><span></span></div>
+                </div>
+              </div>
+              <div class="group-bar">
+                <div class="skeleton-group">
+                  <span class="skeleton-block"></span><span class="skeleton-block skeleton-control"></span>
+                </div>
+                <div class="row">
+                  <span class="skeleton-block skeleton-control"></span>
+                  <span class="skeleton-block skeleton-control"></span>
+                  <span class="skeleton-block skeleton-control"></span>
+                </div>
+              </div>
+              <div class="page-heading">
+                <div class="skeleton-text skeleton-workspace-title"><span></span><span></span></div>
+                <div class="heading-actions">
+                  <div class="row">
+                    <span class="skeleton-block skeleton-control"></span>
+                    <span class="skeleton-block skeleton-control"></span>
+                    <span class="skeleton-block skeleton-control"></span>
+                    <span class="skeleton-block skeleton-control"></span>
+                  </div>
+                  <span class="skeleton-block skeleton-quota"></span>
+                </div>
+              </div>
+              <div class="cards">
+                <div class="metric reference skeleton-metric"><span></span><span></span><span></span></div>
+                <div class="metric current skeleton-metric"><span></span><span></span><span></span></div>
+                <div class="metric skeleton-metric"><span></span><span></span><span></span></div>
+              </div>
+              <div class="panel">
+                <div class="panel-header"><span class="skeleton-block skeleton-list-title"></span></div>
+                <div class="panel-body skeleton-list">
+                  <div class="skeleton-product"><span></span><span></span><span></span><span></span></div>
+                  <div class="skeleton-product"><span></span><span></span><span></span><span></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
       <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
       <dialog id="modal"></dialog>
     </div>

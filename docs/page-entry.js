@@ -13,17 +13,39 @@ if (window.self === window.top) {
     }
   };
   preload(["./core.js?v=performance", "./fallback.js", "./sharing.js?v=performance"]);
-  if (document.body.dataset.page === "tracker") {
+  const tracker = document.body.dataset.page === "tracker";
+  if (tracker) {
     void import("./config.js?v=performance").then(({ needsAuthClient }) => {
-      if (needsAuthClient()) preload(["./vendor/supabase.js"]);
+      if (!needsAuthClient()) return;
+      const app = document.querySelector("#app");
+      if (app.firstElementChild?.matches('[data-loading="landing"]')) {
+        app.replaceChildren(document.querySelector("#workspace-skeleton").content.cloneNode(true));
+      }
+      preload(["./vendor/supabase.js"]);
     }).catch(() => {});
     preload([
       "./comparison-view.js?v=performance",
       "./history-product-picker.js?v=performance",
       "./view-helpers.js?v=performance",
     ]);
-    await import("./app.js?v=performance");
-  } else {
-    await import("./share-view.js?v=performance");
+  }
+  try {
+    if (tracker) await import("./app.js?v=skeleton-ui");
+    else await import("./share-view.js?v=performance");
+  } catch {
+    const target = document.querySelector(tracker ? "#app" : "#shared-content");
+    if (target.querySelector("[data-loading]")) {
+      const message = document.createElement("div");
+      message.className = "boot";
+      message.setAttribute("role", "alert");
+      const description = document.createElement("p");
+      description.textContent = "ページを読み込めませんでした。";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "再読み込み";
+      retry.addEventListener("click", () => location.reload());
+      message.append(description, retry);
+      target.replaceChildren(message);
+    }
   }
 }

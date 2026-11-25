@@ -11,8 +11,8 @@
     <title>共有された商品URLリスト｜PRICE NOTE</title>
     <link rel="icon" href="./icon.png" type="image/png" sizes="512x512">
     <link rel="stylesheet" href="./fonts/noto-sans-jp-5.3.1/wght.css">
-    <link rel="stylesheet" href="./styles.css?v=security-hardening">
-    <script type="module" async src="./page-entry.js?v=performance"></script>
+    <link rel="stylesheet" href="./styles.css?v=skeleton-ui">
+    <script type="module" async src="./page-entry.js?v=skeleton-ui"></script>
   </head>
   <body data-page="share">
     <div id="standalone" hidden>
@@ -20,7 +20,23 @@
         <header
           class="share-header"><a class="brand" href="./"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><div>PRICE NOTE<small>買い時を、見つけよう。</small></div></a><a class="share-workspace" href="./">マイリストを開く →</a></header>
         <section id="shared-content" aria-live="polite">
-          <div class="boot" role="status">共有リストを読み込んでいます…</div>
+          <div class="skeleton-screen" data-loading="share" role="status">
+            <span class="skeleton-status">共有リストを読み込んでいます</span>
+            <div class="skeleton-art" aria-hidden="true">
+              <div class="share-intro skeleton-text skeleton-share-title"><span></span><span></span></div>
+              <div class="panel">
+                <div class="panel-header">
+                  <div class="skeleton-text skeleton-share-list-title"><span></span><span></span></div>
+                  <span class="skeleton-block skeleton-control"></span>
+                </div>
+                <div class="panel-body skeleton-list">
+                  <div class="skeleton-share-row"><span></span><div class="skeleton-text"><span></span><span></span></div></div>
+                  <div class="skeleton-share-row"><span></span><div class="skeleton-text"><span></span><span></span></div></div>
+                  <div class="skeleton-share-row"><span></span><div class="skeleton-text"><span></span><span></span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
         <footer
           class="footer"><span>PRICE NOTE · 価格.com非公式ツール</span><span>共有時点の商品URLリストです。</span></footer>

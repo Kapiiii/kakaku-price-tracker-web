@@ -1922,8 +1922,10 @@ async function authChange(session) {
     return;
   }
   const currentEpoch = epoch;
-  $("#app").innerHTML =
-    `<div class="boot auth-loading" role="status">${brandMark}<p>価格ノートを読み込んでいます…</p></div>`;
+  const app = $("#app");
+  if (!app.firstElementChild?.matches('[data-loading="workspace"]')) {
+    app.replaceChildren($("#workspace-skeleton").content.cloneNode(true));
+  }
   try {
     const result = await api("workspace");
     if (currentEpoch !== epoch) return;
