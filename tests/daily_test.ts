@@ -67,7 +67,7 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       const migration of [
         "20261103095704_account_deletion.sql",
         "20261106144459_restrict_tracker_and_scheduler_access.sql",
-        "20261125063816_workspace_performance.sql",
+        "20261125064528_workspace_performance.sql",
       ]
     ) {
       await db.exec(await Deno.readTextFile(new URL(`../supabase/migrations/${migration}`, import.meta.url)));
