@@ -11,16 +11,18 @@
     <title>PRICE NOTE｜価格追跡・見積もり管理</title>
     <link rel="icon" href="./icon.png" type="image/png" sizes="512x512">
     <link rel="stylesheet" href="./fonts/noto-sans-jp-5.3.1/wght.css">
-    <link rel="stylesheet" href="./styles.css?v=middle-align-comparison">
-    <script type="module" src="./app.js?v=view-refactor"></script>
+    <link rel="stylesheet" href="./styles.css?v=security-hardening">
+    <script type="module" src="./page-entry.js?v=security-hardening"></script>
   </head>
-  <body>
-    <div id="app">
-      <div class="boot"
-        role="status"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><p>PRICE NOTE を開いています…</p></div>
+  <body data-page="tracker">
+    <div id="standalone" hidden>
+      <div id="app">
+        <div class="boot"
+          role="status"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><p>PRICE NOTE を開いています…</p></div>
+      </div>
+      <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
+      <dialog id="modal"></dialog>
     </div>
-    <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
-    <dialog id="modal"></dialog>
     <noscript>このアプリを利用するには、ブラウザーのJavaScriptを有効にしてください。</noscript>
   </body>
 </html>

@@ -33,17 +33,19 @@ Deno.test("account deletion is owner-scoped, cancelable before 30 days, and casc
     };
     const call = (owner: string, operation: string, extra = {}) =>
       dispatch(admin, owner, { action: "account-deletion", operation, ...extra });
-    await rejects(() => call(alice, "schedule"));
+    const schedule = async () =>
+      (await admin.rpc("tracker_account_deletion", { p_owner: alice, p_action: "schedule" })).data;
+    await rejects(() => call(alice, "schedule", { confirm: true }));
     const before = Date.now();
-    const scheduled = await call(alice, "schedule", { confirm: true });
+    const scheduled = await schedule();
     const deadline = +new Date(scheduled.delete_at);
     assert(deadline >= before + 30 * 86400000 && deadline <= Date.now() + 30 * 86400000);
-    equal(await call(alice, "schedule", { confirm: true }), scheduled);
+    equal(await schedule(), scheduled);
     equal(await call(bob, "cancel", { user_id: alice }), { delete_at: null, can_cancel: false });
     equal(await call(alice, "status"), scheduled);
     equal((await db.query("select public.tracker_purge_due_accounts() as count")).rows, [{ count: 0 }]);
     equal(await call(alice, "cancel"), { delete_at: null, can_cancel: false });
-    await call(alice, "schedule", { confirm: true });
+    await schedule();
     await db.query("update public.tracker_account_deletions set delete_at=now() - interval '1 second'");
     equal((await call(alice, "cancel")).can_cancel, false);
     await db.exec("set role authenticated");

@@ -11,20 +11,22 @@
     <title>共有された商品URLリスト｜PRICE NOTE</title>
     <link rel="icon" href="./icon.png" type="image/png" sizes="512x512">
     <link rel="stylesheet" href="./fonts/noto-sans-jp-5.3.1/wght.css">
-    <link rel="stylesheet" href="./styles.css?v=stable-layout">
-    <script type="module" src="./share-view.js?v=heading-cleanup"></script>
+    <link rel="stylesheet" href="./styles.css?v=security-hardening">
+    <script type="module" src="./page-entry.js?v=security-hardening"></script>
   </head>
-  <body>
-    <main class="share-page">
-      <header
-        class="share-header"><a class="brand" href="./"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><div>PRICE NOTE<small>買い時を、見つけよう。</small></div></a><a class="share-workspace" href="./">マイリストを開く →</a></header>
-      <section id="shared-content" aria-live="polite">
-        <div class="boot" role="status">共有リストを読み込んでいます…</div>
-      </section>
-      <footer
-        class="footer"><span>PRICE NOTE · 価格.com非公式ツール</span><span>共有時点の商品URLリストです。</span></footer>
-    </main>
-    <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
+  <body data-page="share">
+    <div id="standalone" hidden>
+      <main class="share-page">
+        <header
+          class="share-header"><a class="brand" href="./"><img class="brand-mark" src="./icon.png" width="40" height="40" alt=""><div>PRICE NOTE<small>買い時を、見つけよう。</small></div></a><a class="share-workspace" href="./">マイリストを開く →</a></header>
+        <section id="shared-content" aria-live="polite">
+          <div class="boot" role="status">共有リストを読み込んでいます…</div>
+        </section>
+        <footer
+          class="footer"><span>PRICE NOTE · 価格.com非公式ツール</span><span>共有時点の商品URLリストです。</span></footer>
+      </main>
+      <div id="notice" class="toast" role="status" aria-live="polite" hidden></div>
+    </div>
     <noscript>このリストを表示するには、ブラウザーのJavaScriptを有効にしてください。</noscript>
   </body>
 </html>

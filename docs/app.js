@@ -41,8 +41,11 @@ const $ = (selector) => document.querySelector(selector);
 const brandMark = '<img class="brand-mark" src="./icon.png" width="40" height="40" alt="">';
 const brand =
   `<div class="brand">${brandMark}<div>PRICE NOTE<small>買い時を、見つけよう。</small></div></div>`;
+const securityIntentKey = "price-note:security-intent";
+const hasOAuthCallback = new URLSearchParams(location.search).has("code");
+const authStorageKey = `sb-${new URL(CONFIG.supabaseUrl).hostname.split(".")[0]}-auth-token`;
 const sb = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
-  auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: true },
+  auth: { storageKey: authStorageKey, flowType: "pkce", persistSession: true, detectSessionInUrl: true },
 });
 let state = null, user = null, demo = false, job = null, processing = false, epoch = 0;
 let groupID = ALL_GROUPS;
@@ -147,7 +150,8 @@ async function api(action, values = {}) {
   }
   const token = session?.access_token;
   if (!token) throw new Error("ログインし直してください。");
-  const response = await fetch(`${CONFIG.supabaseUrl}/functions/v1/tracker-api`, {
+  const route = action === "import" || action === "html" ? `/${action}` : "";
+  const response = await fetch(`${CONFIG.supabaseUrl}/functions/v1/tracker-api${route}`, {
     method: "POST",
     headers: {
       apikey: CONFIG.publishableKey,
@@ -161,12 +165,64 @@ async function api(action, values = {}) {
   const result = await response.json().catch(() => ({}));
   if (epoch !== requestEpoch) throw new Error("アカウントが切り替わりました。もう一度操作してください。");
   if (!response.ok || result.error) {
-    throw new Error(
+    const error = new Error(
       result.error || result.message || `接続エラー (${response.status})。少し待って再度お試しください。`,
     );
+    error.status = response.status;
+    throw error;
   }
   if (result.quota) setManualQuota(result.quota);
   return result;
+}
+function securityIntent(operation) {
+  let saved;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(securityIntentKey) || "null");
+  } catch {
+    return null;
+  }
+  return saved?.owner === user?.id && saved?.operation === operation && saved.expiresAt > Date.now()
+    ? saved
+    : null;
+}
+async function loginWithGitHub(reauthenticate = false) {
+  const response = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
+    headers: { apikey: CONFIG.publishableKey },
+  });
+  if (!response.ok || !(await response.json()).external?.github) {
+    throw new Error("GitHubログインを利用できません。少し待ってお試しください。");
+  }
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: "github",
+    options: {
+      redirectTo: CONFIG.siteUrl,
+      ...(reauthenticate ? { queryParams: { prompt: "select_account" } } : {}),
+    },
+  });
+  if (error) throw error;
+}
+function promptForSecurityIntent(operation) {
+  if (securityIntent(operation)?.ready) return false;
+  modal(
+    '<h2>GitHubで本人確認</h2><p>この操作には、同じGitHubアカウントでの本人確認が必要です。PRICE NOTEに戻ったら、操作をもう一度選択してください。</p>' +
+      `<div class="actions"><button data-close>キャンセル</button><button class="primary" data-action="reauth-${operation}">GitHubで本人確認</button></div>`,
+  );
+  return true;
+}
+async function sensitiveAPI(operation, action, values) {
+  const approval = securityIntent(operation);
+  if (!approval?.ready) throw new Error("GitHubで本人確認をやり直してください。");
+  try {
+    const result = await api(action, { ...values, intent: approval.id, confirm: true });
+    sessionStorage.removeItem(securityIntentKey);
+    return result;
+  } catch (error) {
+    if (error.status === 403) {
+      sessionStorage.removeItem(securityIntentKey);
+      promptForSecurityIntent(operation);
+    }
+    throw error;
+  }
 }
 function groupStorageKey() {
   return `price-note:display-group:${demo ? "demo" : user.id}`;
@@ -1146,6 +1202,7 @@ async function action(name) {
     return;
   }
   if (name === "schedule-account-deletion") {
+    if (promptForSecurityIntent("schedule-deletion")) return;
     modal(
       '<h2>アカウントの削除を予約しますか？</h2><p>30日後にPRICE NOTEのアカウントと、登録商品・価格履歴・設定を削除します。GitHubなど、ログインに使った外部サービスのアカウントには影響しません。</p><form data-account-deletion><label class="row"><input type="checkbox" name="confirm" required>30日後に削除されることを確認しました</label><div class="actions"><button type="button" data-close autofocus>キャンセル</button><button class="danger" type="submit">削除を予約する</button></div></form>',
     );
@@ -1221,17 +1278,16 @@ async function action(name) {
     return;
   }
   if (name === "login") {
-    const response = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
-      headers: { apikey: CONFIG.publishableKey },
-    });
-    if (!response.ok || !(await response.json()).external?.github) {
-      throw new Error("GitHubログインを利用できません。少し待ってお試しください。");
-    }
-    const { error } = await sb.auth.signInWithOAuth({
-      provider: "github",
-      options: { redirectTo: CONFIG.siteUrl },
-    });
-    if (error) throw error;
+    await loginWithGitHub();
+    return;
+  }
+  if (name === "reauth-schedule-deletion" || name === "reauth-restore-backup") {
+    const operation = name.slice("reauth-".length), owner = user.id;
+    const { intent } = await api("security-intent", { operation });
+    sessionStorage.setItem(securityIntentKey, JSON.stringify({
+      operation, owner, id: intent, expiresAt: Date.now() + 5 * 60_000, ready: false,
+    }));
+    await loginWithGitHub(true);
     return;
   }
   if (name === "demo") {
@@ -1259,7 +1315,30 @@ async function action(name) {
     return;
   }
   if (name === "logout") {
-    if (!demo) await flushPrefs();
+    if (!demo) {
+      await Promise.race([flushPrefs().catch(() => {}), wait(2000)]);
+      // Stop this tab from refreshing the session while signing out.
+      await sb.auth.stopAutoRefresh();
+      let remoteError = null;
+      try {
+        ({ error: remoteError } = await sb.auth.signOut());
+      } catch (error) {
+        remoteError = error;
+      }
+      try {
+        localStorage.removeItem(authStorageKey);
+        localStorage.removeItem(`${authStorageKey}-code-verifier`);
+        localStorage.removeItem(`${authStorageKey}-user`);
+        sessionStorage.removeItem(securityIntentKey);
+      } catch {
+        throw new Error("この端末のログイン情報を消去できませんでした。ブラウザーのサイトデータを削除してください。");
+      }
+      await authChange(null);
+      if (remoteError) {
+        notify("この端末からログアウトしました。他の端末のセッションを失効できたか確認できません。", true);
+      }
+      return;
+    }
     $("#modal").close();
     epoch++;
     clearTimeout(prefsTimer);
@@ -1268,14 +1347,8 @@ async function action(name) {
     state = null;
     job = null;
     processing = false;
-    if (demo) {
-      demo = false;
-      loginScreen();
-    } else {
-      await sb.auth.signOut();
-      user = null;
-      loginScreen();
-    }
+    demo = false;
+    loginScreen();
     return;
   }
   if (name === "clear-excluded") {
@@ -1383,6 +1456,7 @@ async function action(name) {
     return;
   }
   if (name === "import") {
+    if (promptForSecurityIntent("restore-backup")) return;
     if (demo) throw new Error("バックアップの復元はログイン後にご利用ください。");
     modal(
       '<h2>バックアップから復元</h2><p>現在のデータを、選択したバックアップの内容に置き換えます。必要に応じて先にバックアップを保存してください。</p><form data-import><label class="field">JSONバックアップ<input type="file" name="file" accept=".json,application/json" required></label><label class="row"><input type="checkbox" name="confirm" required>現在のデータを置き換えることを確認しました</label><div class="actions"><button type="button" data-close>キャンセル</button><button type="submit" class="primary">復元する</button></div></form>',
@@ -1628,7 +1702,7 @@ async function saveForm(form) {
   try {
     if (form.hasAttribute("data-account-deletion")) {
       if (data.get("confirm") !== "on") throw new Error("確認欄にチェックを入れてください。");
-      const status = await api("account-deletion", { operation: "schedule", confirm: true });
+      const status = await sensitiveAPI("schedule-deletion", "account-deletion", { operation: "schedule" });
       $("#modal").close();
       const panel = $("#account-deletion");
       if (panel) showDeletionStatus(panel, status);
@@ -1738,7 +1812,8 @@ async function saveForm(form) {
       }
       importBackup(backup);
       await flushPrefs();
-      adopt((await api("import", { backup, confirm: data.get("confirm") === "on" })).state);
+      if (data.get("confirm") !== "on") throw new Error("確認欄にチェックを入れてください。");
+      adopt((await sensitiveAPI("restore-backup", "import", { backup })).state);
       $("#modal").close();
       shell();
       notify("バックアップを復元しました。");
@@ -1814,6 +1889,15 @@ async function authChange(session) {
     groupID = savedGroup();
     adopt(result.state);
     job = result.job;
+    if (hasOAuthCallback) {
+      const approval = securityIntent("schedule-deletion") ?? securityIntent("restore-backup");
+      if (approval && !approval.ready) {
+        sessionStorage.setItem(securityIntentKey, JSON.stringify({ ...approval, ready: true }));
+        tab = "manage";
+        sectionSelection.manage = approval.operation === "schedule-deletion" ? "account" : "backup";
+        notify("GitHubから戻りました。本人確認を始めた操作をもう一度選択してください。");
+      }
+    }
     shell();
   } catch (e) {
     if (currentEpoch === epoch) {
@@ -1828,6 +1912,11 @@ sb.auth.onAuthStateChange((_event, session) => {
   setTimeout(() => {
     authChange(session).catch((e) => notify(e.message, true));
   }, 0);
+});
+window.addEventListener("storage", (event) => {
+  if (event.storageArea === localStorage && event.key === authStorageKey && event.newValue === null && user) {
+    void authChange(null);
+  }
 });
 // 開いている画面にも自動更新の進捗・完了を反映する。入力中の設定画面は再描画しない。
 setInterval(async () => {

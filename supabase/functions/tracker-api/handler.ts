@@ -22,9 +22,11 @@ import { categoryURL, productFallbackURL } from "../../../docs/fallback.js";
 
 type Client = any;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export function allowedOrigin(origin: string) {
-  return origin === "https://kapiiii.github.io" || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+export function allowedOrigin(origin: string, developmentOrigin = "") {
+  return origin === "https://kapiiii.github.io" ||
+    (origin === developmentOrigin && /^http:\/\/(localhost|127\.0\.0\.1):[1-9]\d{0,4}$/.test(origin));
 }
+const fetchBudgetError = "本日の価格取得上限に達しました。日本時間の翌日0時以降にお試しください。";
 const expectedDatabaseErrors = new Map([
   ["更新中です。完了後に操作してください。", 409],
   ["先に実行中の更新を再開または中止してください。", 409],
@@ -33,6 +35,8 @@ const expectedDatabaseErrors = new Map([
   ["次の更新まで30秒ほどお待ちください。", 429],
   ["取得が混み合っています。時間をおいて再実行してください。", 429],
   ["手動の一括更新は1日2回までです。日本時間の翌日0時以降に再度お試しください。", 429],
+  [fetchBudgetError, 429],
+  ["他の画面で変更されました。画面を再読み込みしてお試しください。", 409],
 ]);
 function databaseError(operation: string, error: { code?: string; message?: string }) {
   const status = expectedDatabaseErrors.get(error.message ?? "");
@@ -123,6 +127,29 @@ function validID(value: unknown): string {
   return value;
 }
 const isProductID = (id: unknown) => typeof id === "string" && id.length > 0 && id.length <= 100;
+type SensitiveOperation = "schedule-deletion" | "restore-backup";
+type Session = { owner: string; admin: Client; id?: string; oauth?: boolean };
+
+async function performSensitiveOperation(session: Session, operation: SensitiveOperation, body: any) {
+  const intent = body.intent;
+  if (!session.id || !session.oauth || typeof intent !== "string" || !UUID_PATTERN.test(intent)) {
+    throw new RequestError("GitHubで本人確認をやり直してください。", 403);
+  }
+  const backup = operation === "restore-backup" ? validateInput(() => importBackup(body.backup)) : null;
+  if (backup && activeProducts(backup).length > 100) {
+    throw new RequestError("登録中の商品は100件までです。");
+  }
+  const result = await rpc(session.admin, "tracker_apply_security_intent", {
+    p_owner: session.owner,
+    p_session: session.id,
+    p_operation: operation,
+    p_intent: intent,
+    p_backup: backup,
+  });
+  if (!result) throw new RequestError("本人確認が失効しました。GitHubで本人確認をやり直してください。", 403);
+  return result;
+}
+
 export async function dispatch(
   admin: Client,
   owner: string,
@@ -150,11 +177,8 @@ export async function dispatch(
     }
     case "account-deletion": {
       const operation = body.operation;
-      if (!["status", "schedule", "cancel"].includes(operation)) {
+      if (!["status", "cancel"].includes(operation)) {
         throw new RequestError("操作を確認してください。");
-      }
-      if (operation === "schedule" && body.confirm !== true) {
-        throw new RequestError("削除予約の確認が必要です。");
       }
       return await rpc(admin, "tracker_account_deletion", { p_owner: owner, p_action: operation });
     }
@@ -288,10 +312,19 @@ export async function dispatch(
       const payload = clone(job.payload), url = payload.urls[payload.index];
       let stopped = false;
       const reserve = async (seconds: number) => {
-        const delay = await rpc(admin, "tracker_reserve_request", {
-          p_seconds: Math.max(3, Math.ceil(seconds)),
-        });
-        if (delay > 0) await sleep(delay);
+        try {
+          const delay = await rpc(admin, "tracker_reserve_account_request", {
+            p_owner: owner,
+            p_origin: job.origin === "daily" ? "daily" : "manual",
+            p_seconds: Math.max(3, Math.ceil(seconds)),
+          });
+          if (delay > 0) await sleep(delay);
+        } catch (error) {
+          if (error instanceof RequestError && error.message === fetchBudgetError) {
+            throw new PriceError(fetchBudgetError, true);
+          }
+          throw error;
+        }
       };
       const fallbackState = payload.pendingFallback ? (await readState(admin, owner)).data : null;
       if (
@@ -356,10 +389,13 @@ export async function dispatch(
         if (!payload.pendingFallback) payload.index++;
       }
       if (stopped) {
+        const message = payload.results.at(-1)?.error?.includes(fetchBudgetError)
+          ? fetchBudgetError
+          : "アクセス制限を受けたため、今回の残りの取得を停止しました。";
         while (payload.index < payload.urls.length) {
           payload.results.push({
             url: payload.urls[payload.index++],
-            error: "アクセス制限を受けたため、今回の残りの取得を停止しました。",
+            error: message,
           });
         }
       }
@@ -437,62 +473,165 @@ export async function dispatch(
         }),
       };
     }
-    case "import": {
-      if (body.confirm !== true) throw new RequestError("バックアップの復元を確認してください。");
-      const restored = validateInput(() => importBackup(body.backup));
-      if (activeProducts(restored).length > 100) throw new RequestError("登録中の商品は100件までです。");
-      return { state: await mutate(admin, owner, () => restored) };
-    }
     default:
       throw new RequestError("操作を選択してください。");
   }
 }
-async function authenticate(req: Request): Promise<{ owner: string; admin: Client } | null> {
+async function authenticate(req: Request): Promise<Session | null> {
   const { data: ctx, error } = await createSupabaseContext(req, { auth: "user" });
   const owner = ctx?.jwtClaims?.sub;
   if (
     error || !ctx || ctx.jwtClaims?.role !== "authenticated" || ctx.jwtClaims?.is_anonymous === true ||
     typeof owner !== "string" || !UUID_PATTERN.test(owner)
   ) return null;
-  return { owner, admin: ctx.supabaseAdmin };
+  const id = ctx.jwtClaims?.session_id;
+  const amr = ctx.jwtClaims?.amr;
+  return {
+    owner,
+    admin: ctx.supabaseAdmin,
+    id: typeof id === "string" && UUID_PATTERN.test(id) ? id : undefined,
+    oauth: Array.isArray(amr) && amr.some((claim) => claim?.method === "oauth"),
+  };
 }
 
-export async function handler(req: Request, getSession = authenticate): Promise<Response> {
+type AuditEvent =
+  | "confirm-deletion"
+  | "cancel-deletion"
+  | "restore-backup"
+  | "reauthenticate"
+  | "large-request";
+async function logSecurityEvent(session: Session, requestID: string, event: AuditEvent, status: number) {
+  const outcome = status < 400 ? "ok" : status < 500 ? "denied" : "error";
+  try {
+    const details = await rpc(session.admin, "tracker_security_event", {
+      p_owner: session.owner,
+      p_event: event,
+      p_outcome: outcome,
+    });
+    const record = {
+      type: "tracker-security",
+      request_id: requestID,
+      event,
+      outcome,
+      status,
+      actor: details?.actor,
+      alert: details?.alert === true,
+    };
+    if (record.alert) console.warn(JSON.stringify(record));
+    else console.info(JSON.stringify(record));
+  } catch {
+    console.warn(JSON.stringify({ type: "tracker-security", request_id: requestID, event, outcome, status }));
+  }
+}
+
+export async function handler(
+  req: Request,
+  getSession = authenticate,
+  developmentOrigin = "",
+): Promise<Response> {
   const origin = req.headers.get("Origin") ?? "";
+  const requestID = crypto.randomUUID();
   const headers: Record<string, string> = {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "Vary": "Origin",
     "X-Content-Type-Options": "nosniff",
+    "X-Request-Id": requestID,
   };
-  if (origin && !allowedOrigin(origin)) {
+  if (origin && !allowedOrigin(origin, developmentOrigin)) {
     return Response.json({ error: "このサイトからの接続は許可されていません。" }, { status: 403, headers });
   }
   if (origin) headers["Access-Control-Allow-Origin"] = origin;
   headers["Access-Control-Allow-Headers"] = "authorization,apikey,content-type,x-client-info";
   headers["Access-Control-Allow-Methods"] = "POST,OPTIONS";
+  headers["Access-Control-Expose-Headers"] = "X-Request-Id";
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers });
   if (req.method !== "POST") {
     return Response.json({ error: "POSTを使用してください。" }, { status: 405, headers });
   }
+  let session: Session | null = null;
+  let largeRequestLease: string | null = null;
+  let event: AuditEvent | null = null;
+  let status = 200;
   try {
     if (!req.headers.get("Authorization")?.startsWith("Bearer ")) {
       return Response.json({ error: "ログインが必要です。" }, { status: 401, headers });
     }
-    const session = await getSession(req);
+    session = await getSession(req);
     if (!session) {
       return Response.json({ error: "ログインの有効期限を確認してください。" }, { status: 401, headers });
     }
-    const { body, size } = await readJSONRequest(req, 22_000_000);
-    const limit = body.action === "import" ? 22_000_000 : body.action === "html" ? 6_100_000 : 2_000_000;
-    if (size > limit) throw new RequestError("読み込みデータが上限を超えています。", 413);
+    const path = new URL(req.url).pathname;
+    const upload = path.endsWith("/tracker-api/import")
+      ? "import"
+      : path.endsWith("/tracker-api/html")
+      ? "html"
+      : null;
+    if (upload) {
+      event = upload === "import" ? "restore-backup" : "large-request";
+      largeRequestLease = await rpc(session.admin, "tracker_take_large_request", { p_owner: session.owner });
+      if (!largeRequestLease) {
+        throw new RequestError(
+          "大容量データを処理中か、回数の上限に達しました。少し待ってお試しください。",
+          429,
+        );
+      }
+    }
+    const { body } = await readJSONRequest(
+      req,
+      upload === "import" ? 22_000_000 : upload === "html" ? 6_100_000 : 2_000_000,
+    );
+    if (upload ? body.action !== upload : body.action === "import" || body.action === "html") {
+      throw new RequestError("操作と送信先が一致しません。画面を再読み込みしてください。", 400);
+    }
+    if (body.action === "security-intent") {
+      event = "reauthenticate";
+      if (
+        !session.id || !session.oauth ||
+        (body.operation !== "schedule-deletion" && body.operation !== "restore-backup")
+      ) throw new RequestError("GitHubでログインし直してください。", 403);
+      const intent = await rpc(session.admin, "tracker_begin_security_intent", {
+        p_owner: session.owner,
+        p_session: session.id,
+        p_operation: body.operation,
+      });
+      if (!intent) {
+        throw new RequestError("本人確認を開始できません。少し待つか、ログインし直してください。", 429);
+      }
+      return Response.json({ intent }, { headers });
+    }
+    if ((body.action === "account-deletion" && body.operation === "schedule") || body.action === "import") {
+      event = body.action === "import" ? "restore-backup" : "confirm-deletion";
+      if (body.confirm !== true) throw new RequestError("操作の確認が必要です。");
+      const result = await performSensitiveOperation(
+        session,
+        body.action === "import" ? "restore-backup" : "schedule-deletion",
+        body,
+      );
+      return Response.json(result, { headers });
+    }
+    if (body.action === "account-deletion" && body.operation === "cancel") event = "cancel-deletion";
     const result = await dispatch(session.admin, session.owner, body);
     return Response.json(result, { headers });
   } catch (error) {
     if (error instanceof RequestError) {
-      return Response.json({ error: error.message }, { status: error.status, headers });
+      status = error.status;
+      return Response.json({ error: error.message }, { status, headers });
     }
-    console.error("Tracker request failed");
-    return Response.json({ error: "処理に失敗しました。" }, { status: 500, headers });
+    console.error("Tracker request failed", requestID);
+    status = 500;
+    return Response.json({ error: "処理に失敗しました。" }, { status, headers });
+  } finally {
+    if (session && largeRequestLease) {
+      try {
+        await rpc(session.admin, "tracker_release_large_request", {
+          p_owner: session.owner,
+          p_lease: largeRequestLease,
+        });
+      } catch {
+        console.warn("Large request lease release failed", requestID);
+      }
+    }
+    if (session && event) await logSecurityEvent(session, requestID, event, status);
   }
 }
