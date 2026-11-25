@@ -964,12 +964,46 @@ th.numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.compare-table {
+  min-width: 620px;
+  table-layout: fixed;
+}
+.compare-product-column {
+  width: 40%;
+}
+.compare-reference-column {
+  width: 18%;
+}
+.compare-price-column {
+  width: 21%;
+}
+.compare-table tbody tr {
+  height: 142px;
+}
+.compare-table td {
+  vertical-align: top;
+  padding-block: 16px;
+}
+.compare-table .price-main {
+  line-height: 1.6;
+}
+.compare-table .price-small {
+  max-width: none;
+}
+.compare-table .alternative,
+.compare-price-change {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.compare-table .alternative {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .product-cell {
   display: flex;
   gap: 12px;
-  align-items: center;
-  min-width: 220px;
-  max-width: 320px;
+  align-items: flex-start;
 }
 .product-cell > div {
   min-width: 0;
@@ -1045,20 +1079,12 @@ th.numeric {
   color: var(--text);
   text-decoration: none;
 }
-.product-name.product-detail-link {
-  max-width: 100%;
-  min-height: 26px;
-  padding: 0;
-  border: 0;
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: var(--control-line);
-  text-underline-offset: 3px;
+.product-cell .product-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
-}
-.product-name.product-detail-link:hover {
-  color: var(--selection-blue);
-  text-decoration-color: currentColor;
 }
 .product-sub {
   display: flex;
@@ -1072,12 +1098,19 @@ th.numeric {
 .product-sub .tag {
   margin-right: 0;
 }
+.product-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+.product-detail-button,
 .product-source-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 26px;
-  padding: 3px 7px;
+  min-height: 30px;
+  padding: 4px 8px;
   border: 1px solid var(--control-line);
   border-radius: 6px;
   background: var(--paper);
@@ -1086,6 +1119,7 @@ th.numeric {
   line-height: 1.3;
   text-decoration: none;
 }
+.product-detail-button:hover,
 .product-source-link:hover {
   border-color: var(--selection-blue);
   color: var(--selection-blue);
@@ -1594,8 +1628,16 @@ details summary {
   .shops-dialog {
     padding: 20px;
   }
-  .product-cell {
-    max-width: 260px;
+  .compare-table th,
+  .compare-table td {
+    padding-inline: 12px;
+  }
+  .compare-table .product-cell {
+    gap: 9px;
+  }
+  .compare-table .product-image {
+    width: 40px;
+    height: 40px;
   }
   .banner {
     font-size: 13px;

@@ -708,9 +708,9 @@ function renderCompare() {
     esc(dateLabel(latest?.completed_at))
   }</p></div><div class="toolbar"><button class="small-button" data-action="compare-csv">CSV保存 ↓</button></div></div>${
     rows.length
-      ? `<div class="table-scroll"><table><thead><tr><th>商品</th><th class="numeric">${
+      ? `<div class="table-scroll"><table class="compare-table"><colgroup><col class="compare-product-column"><col class="compare-reference-column"><col class="compare-price-column"><col class="compare-price-column"></colgroup><thead><tr><th scope="col">商品</th><th scope="col" class="numeric">${
         pastId === INITIAL_POINT ? "初回登録時点" : "指定時点"
-      }</th><th class="numeric">現在の最安</th><th class="numeric">除外後の最安</th></tr></thead><tbody>${
+      }</th><th scope="col" class="numeric">現在の最安</th><th scope="col" class="numeric">除外後の最安</th></tr></thead><tbody>${
         rows.map((r) =>
           `<tr><td><div class="product-cell">${
             r.image_url
@@ -718,13 +718,7 @@ function renderCompare() {
                 esc(safeURL(r.image_url))
               }" alt="" loading="lazy" referrerpolicy="no-referrer">`
               : '<span class="product-image product-placeholder">◇</span>'
-          }<div><button type="button" class="ghost product-name product-detail-link" data-product="${esc(r.id)}" aria-label="${
-            esc(r.name)
-          }の詳細を開く">${
-            esc(r.name)
-          }</button><div class="product-sub"><a class="product-source-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" aria-label="${
-            esc(r.name)
-          }を価格.comで見る（新しいタブ）">価格.comで見る <span aria-hidden="true">↗</span></a>${
+          }<div><span class="product-name" title="${esc(r.name)}">${esc(r.name)}</span><div class="product-sub">${
             r.carried
               ? '<span class="tag warn">前回価格</span>'
               : r.capture
@@ -734,7 +728,11 @@ function renderCompare() {
             r.capture?.source === "html" ? '<span class="tag">保存HTML</span>' : ""
           }<span>${
             r.capture?.offers.length ?? 0
-          } ショップ</span></div></div></div></td><td class="numeric"><div class="price-main">${
+          } ショップ</span></div><div class="product-actions"><button type="button" class="product-detail-button" data-product="${esc(r.id)}" aria-label="${
+            esc(r.name)
+          }の詳細を開く">詳細</button><a class="product-source-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" aria-label="${
+            esc(r.name)
+          }を価格.comで見る（新しいタブ）">価格.comで見る <span aria-hidden="true">↗</span></a></div></div></div></td><td class="numeric"><div class="price-main">${
             yen(r.past)
           }</div><div class="price-small">${
             r.past === null
@@ -748,7 +746,7 @@ function renderCompare() {
             yen(r.current)
           }</div><div class="price-small" title="${esc(r.currentShop)}">${esc(r.currentShop)}</div>${
             alternative(r.currentOffer)
-          }<div class="price-small">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
+          }<div class="price-small compare-price-change">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
             delta(
               r.current !== null && r.past !== null && r.current_basis === r.past_basis
                 ? r.current - r.past
