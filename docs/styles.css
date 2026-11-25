@@ -750,7 +750,7 @@ dialog {
   position: relative;
 }
 .metric.current {
-  background: linear-gradient(145deg,#e8ecff,#dce4ff);
+  background: #e2e8ff;
   border-color: #aab7e8;
 }
 .metric .metric-label {
