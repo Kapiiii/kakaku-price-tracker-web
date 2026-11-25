@@ -1,5 +1,5 @@
-import { productImageURL } from "./core.js?v=input-validation";
-import { escapeHTML } from "./view-helpers.js";
+import { productImageURL } from "./core.js?v=performance";
+import { escapeHTML } from "./view-helpers.js?v=performance";
 
 export const HISTORY_PRODUCT_DIALOG_TITLE_ID = "history-product-dialog-title";
 
@@ -9,7 +9,7 @@ function thumbnail(product) {
     url
       ? `<img class="product-image" src="${
         escapeHTML(url)
-      }" alt="" loading="lazy" referrerpolicy="no-referrer" data-history-product-image>`
+      }" alt="" width="44" height="44" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-history-product-image>`
       : ""
   }</span>`;
 }

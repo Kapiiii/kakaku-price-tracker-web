@@ -5,8 +5,8 @@ import {
   safeURL,
   summary,
   yen,
-} from "./core.js?v=input-validation";
-import { alternative, amount, delta, emptyView, escapeHTML, kindName } from "./view-helpers.js";
+} from "./core.js?v=performance";
+import { alternative, amount, delta, emptyView, escapeHTML, kindName } from "./view-helpers.js?v=performance";
 
 export function comparisonPointLabel(snapshots, point) {
   if (point === INITIAL_POINT) return "初回登録時点";
@@ -88,7 +88,7 @@ function productCell(row) {
   const image = row.image_url
     ? `<img class="product-image" src="${
       escapeHTML(safeURL(row.image_url))
-    }" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    }" alt="" width="44" height="44" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
     : '<span class="product-image product-placeholder">◇</span>';
   return `<td><div class="product-cell">
     ${image}

@@ -278,11 +278,16 @@ export function priceView(state) {
   };
 }
 export function comparison(state, pastId = comparisonPoint(state)) {
-  const captures = capMap(state), current = itemMap(lastSnapshot(state));
+  const captures = new Map(), latest = new Map();
+  for (const capture of state.captures) {
+    captures.set(String(capture.id), capture);
+    latest.set(String(capture.product_id), capture);
+  }
+  const current = itemMap(lastSnapshot(state));
   const past = itemMap(state.snapshots.find((s) => String(s.id) === String(pastId)));
   const offers = offerLookup(state.excluded);
   return activeProducts(state).map((p) => {
-    const c = latestCapture(state, p.id), initial = captures.get(String(p.initial_capture_id));
+    const c = latest.get(String(p.id)), initial = captures.get(String(p.initial_capture_id));
     const old = past.get(String(p.id));
     const pc = pastId === INITIAL_POINT ? initial : captures.get(String(old?.capture_id));
     const first = offers(initial).raw, previous = offers(pc).raw;

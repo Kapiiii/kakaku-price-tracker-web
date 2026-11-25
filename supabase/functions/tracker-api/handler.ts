@@ -72,7 +72,9 @@ async function rpc(admin: Client, name: string, args: Record<string, unknown>) {
   return data;
 }
 async function runningJob(admin: Client, owner: string) {
-  const { data, error } = await admin.from("tracker_jobs").select("*").eq("user_id", owner).eq(
+  const { data, error } = await admin.from("tracker_jobs").select(
+    "id,kind,status,created_at,origin,scheduled_date,payload",
+  ).eq("user_id", owner).eq(
     "status",
     "running",
   ).limit(1).maybeSingle();
@@ -107,7 +109,12 @@ function publicJob(job: any) {
 async function readState(admin: Client, owner: string) {
   return await rpc(admin, "tracker_ensure_state", { p_owner: owner });
 }
-async function mutate(admin: Client, owner: string, transform: (data: any) => any, allowRunning = false) {
+async function mutateWithVersion(
+  admin: Client,
+  owner: string,
+  transform: (data: any) => any,
+  allowRunning = false,
+) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const row = await readState(admin, owner), state = transform(clone(row.data));
     const ok = await rpc(admin, "tracker_write_state", {
@@ -116,9 +123,12 @@ async function mutate(admin: Client, owner: string, transform: (data: any) => an
       p_data: state,
       p_allow_running: allowRunning,
     });
-    if (ok) return state;
+    if (ok) return { state, previous_version: row.version, version: Number(row.version) + 1 };
   }
   throw new RequestError("他の画面で変更されました。画面を再読み込みしてお試しください。", 409);
+}
+async function mutate(admin: Client, owner: string, transform: (data: any) => any) {
+  return (await mutateWithVersion(admin, owner, transform)).state;
 }
 function validID(value: unknown): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
@@ -158,21 +168,40 @@ export async function dispatch(
   categoryFetcher = fetchCategory,
 ): Promise<any> {
   switch (body.action) {
+    case "workspace": {
+      const version = body.known_version;
+      if (version != null && (!Number.isSafeInteger(version) || version < 0)) {
+        throw new RequestError("保存状態の版を確認してください。");
+      }
+      const result = await rpc(admin, "tracker_read_workspace", {
+        p_owner: owner,
+        p_known_version: version ?? null,
+      });
+      if (!result) throw new RequestError("ログインし直してください。", 401);
+      return result;
+    }
     case "get": {
-      const row = await readState(admin, owner);
+      const [row, job, quota] = await Promise.all([
+        readState(admin, owner),
+        runningJob(admin, owner),
+        rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+      ]);
       return {
         state: row.data,
         version: row.version,
-        job: publicJob(await runningJob(admin, owner)),
-        quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+        job: publicJob(job),
+        quota,
       };
     }
     case "status": {
-      const row = await rpc(admin, "tracker_status", { p_owner: owner });
+      const [row, quota] = await Promise.all([
+        rpc(admin, "tracker_status", { p_owner: owner }),
+        rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+      ]);
       return {
         version: row.version,
         job: publicJob(row.job),
-        quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
+        quota,
       };
     }
     case "account-deletion": {
@@ -192,7 +221,7 @@ export async function dispatch(
           (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)))
       ) throw new RequestError("取得設定を確認してください。");
       if (body.excluded?.length > 2000) throw new RequestError("除外ショップが多すぎます。");
-      const state = await mutate(admin, owner, (data) => {
+      const result = await mutateWithVersion(admin, owner, (data) => {
         if (Array.isArray(body.excluded)) {
           const known = new Set(shopList(data).map((s: any) => s.key));
           data.excluded = [
@@ -233,7 +262,9 @@ export async function dispatch(
         }
         return data;
       }, true);
-      return { state };
+      return body.include_state === false
+        ? { previous_version: result.previous_version, version: result.version }
+        : { state: result.state };
     }
     case "fallback-preferences": {
       const mode = body.mode;

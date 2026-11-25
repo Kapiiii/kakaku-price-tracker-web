@@ -1,14 +1,20 @@
-import { createClient } from "./vendor/supabase.js";
-import { CONFIG } from "./config.js?v=github-only";
-import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
-import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=input-validation";
-import { comparisonPointLabel, renderComparison } from "./comparison-view.js";
+import { authStorageKey, CONFIG, needsAuthClient } from "./config.js?v=performance";
+import { copyText, createShareURL, productListText, shareItems } from "./sharing.js?v=performance";
+import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js";
+import { comparisonPointLabel, renderComparison } from "./comparison-view.js?v=performance";
 import {
   HISTORY_PRODUCT_DIALOG_TITLE_ID,
   renderHistoryProductDialog,
   renderHistoryProductPicker,
-} from "./history-product-picker.js";
-import { alternative, amount, delta, emptyView, escapeHTML as esc, kindName } from "./view-helpers.js";
+} from "./history-product-picker.js?v=performance";
+import {
+  alternative,
+  amount,
+  delta,
+  emptyView,
+  escapeHTML as esc,
+  kindName,
+} from "./view-helpers.js?v=performance";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -35,7 +41,7 @@ import {
   safeURL,
   shopList,
   yen,
-} from "./core.js?v=input-validation";
+} from "./core.js?v=performance";
 
 const $ = (selector) => document.querySelector(selector);
 const brandMark = '<img class="brand-mark" src="./icon.png" width="40" height="40" alt="">';
@@ -43,10 +49,23 @@ const brand =
   `<div class="brand">${brandMark}<div>PRICE NOTE<small>買い時を、見つけよう。</small></div></div>`;
 const securityIntentKey = "price-note:security-intent";
 const hasOAuthCallback = new URLSearchParams(location.search).has("code");
-const authStorageKey = `sb-${new URL(CONFIG.supabaseUrl).hostname.split(".")[0]}-auth-token`;
-const sb = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
-  auth: { storageKey: authStorageKey, flowType: "pkce", persistSession: true, detectSessionInUrl: true },
-});
+let authClientPromise;
+function authClient() {
+  return authClientPromise ??= import("./vendor/supabase.js").then(({ createClient }) => {
+    const client = createClient(CONFIG.supabaseUrl, CONFIG.publishableKey, {
+      auth: { storageKey: authStorageKey, flowType: "pkce", persistSession: true, detectSessionInUrl: true },
+    });
+    client.auth.onAuthStateChange((_event, session) => {
+      setTimeout(() => {
+        authChange(session).catch((e) => notify(e.message, true));
+      }, 0);
+    });
+    return client;
+  }).catch((error) => {
+    authClientPromise = undefined;
+    throw error;
+  });
+}
 let state = null, user = null, demo = false, job = null, processing = false, epoch = 0;
 let groupID = ALL_GROUPS;
 let tab = "compare",
@@ -144,7 +163,8 @@ function fallbackFields(mode, url = "") {
 }
 async function api(action, values = {}) {
   const requestEpoch = epoch, owner = user?.id;
-  const session = (await sb.auth.getSession()).data.session;
+  const { auth } = await authClient();
+  const session = (await auth.getSession()).data.session;
   if (epoch !== requestEpoch || session?.user.id !== owner) {
     throw new Error("アカウントが切り替わりました。もう一度操作してください。");
   }
@@ -186,13 +206,14 @@ function securityIntent(operation) {
     : null;
 }
 async function loginWithGitHub(reauthenticate = false) {
-  const response = await fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, {
-    headers: { apikey: CONFIG.publishableKey },
-  });
+  const [{ auth }, response] = await Promise.all([
+    authClient(),
+    fetch(`${CONFIG.supabaseUrl}/auth/v1/settings`, { headers: { apikey: CONFIG.publishableKey } }),
+  ]);
   if (!response.ok || !(await response.json()).external?.github) {
     throw new Error("GitHubログインを利用できません。少し待ってお試しください。");
   }
-  const { error } = await sb.auth.signInWithOAuth({
+  const { error } = await auth.signInWithOAuth({
     provider: "github",
     options: {
       redirectTo: CONFIG.siteUrl,
@@ -293,7 +314,10 @@ async function flushPrefs() {
     prefsChain = prefsChain.catch(() => {}).then(async () => {
       if (epoch !== currentEpoch) return;
       try {
-        await api("preferences", values);
+        const result = await api("preferences", { ...values, include_state: false });
+        if (result.previous_version != null && result.previous_version === knownVersion) {
+          knownVersion = result.version;
+        }
       } catch (e) {
         if (epoch === currentEpoch) prefsPending = true;
         throw e;
@@ -680,9 +704,25 @@ function renderCompare() {
     historyChart,
   });
 }
+const historyAggregations = new WeakMap();
 function historyRows() {
   const cutoff = range === "all" ? 0 : Date.now() - Number(range) * 86400000;
-  return basketHistory(priceView(groupView(state, groupID)), fixed).filter((r) =>
+  const excluded = JSON.stringify(state.excluded), fallback = state.settings.fallback_enabled !== false;
+  let cached = historyAggregations.get(state);
+  if (
+    !cached || cached.groupID !== groupID || cached.fixed !== fixed || cached.excluded !== excluded ||
+    cached.fallback !== fallback
+  ) {
+    cached = {
+      groupID,
+      fixed,
+      excluded,
+      fallback,
+      records: basketHistory(priceView(groupView(state, groupID)), fixed),
+    };
+    historyAggregations.set(state, cached);
+  }
+  return cached.records.filter((r) =>
     +new Date(r.date) >= cutoff && (groupID === ALL_GROUPS || fixed || r.raw.count > 0)
   );
 }
@@ -1318,10 +1358,11 @@ async function action(name) {
     if (!demo) {
       await Promise.race([flushPrefs().catch(() => {}), wait(2000)]);
       // Stop this tab from refreshing the session while signing out.
-      await sb.auth.stopAutoRefresh();
+      const { auth } = await authClient();
+      await auth.stopAutoRefresh();
       let remoteError = null;
       try {
-        ({ error: remoteError } = await sb.auth.signOut());
+        ({ error: remoteError } = await auth.signOut());
       } catch (error) {
         remoteError = error;
       }
@@ -1865,6 +1906,7 @@ async function authChange(session) {
   groupID = ALL_GROUPS;
   state = null;
   manualQuota = null;
+  knownVersion = null;
   refreshStarting = false;
   clearTimeout(quotaResetTimer);
   job = null;
@@ -1883,7 +1925,7 @@ async function authChange(session) {
   $("#app").innerHTML =
     `<div class="boot auth-loading" role="status">${brandMark}<p>価格ノートを読み込んでいます…</p></div>`;
   try {
-    const result = await api("get");
+    const result = await api("workspace");
     if (currentEpoch !== epoch) return;
     knownVersion = result.version;
     groupID = savedGroup();
@@ -1908,15 +1950,10 @@ async function authChange(session) {
     }
   }
 }
-sb.auth.onAuthStateChange((_event, session) => {
-  setTimeout(() => {
-    authChange(session).catch((e) => notify(e.message, true));
-  }, 0);
-});
 window.addEventListener("storage", (event) => {
-  if (event.storageArea === localStorage && event.key === authStorageKey && event.newValue === null && user) {
-    void authChange(null);
-  }
+  if (event.key !== authStorageKey || event.storageArea !== localStorage) return;
+  if (event.newValue === null && user) void authChange(null);
+  else if (event.newValue && !authClientPromise) void restoreSession();
 });
 // 開いている画面にも自動更新の進捗・完了を反映する。入力中の設定画面は再描画しない。
 setInterval(async () => {
@@ -1931,16 +1968,14 @@ setInterval(async () => {
     previousFallback = JSON.stringify(job?.fallback),
     previousSnapshot = state.snapshots.at(-1)?.id;
   try {
-    const status = await api("status");
-    if (revision !== viewRevision || processing || job?.id !== previousJobID || unsavedSettingsForms().length) return;
-    if (status.version !== knownVersion) {
-      const result = await api("get");
-      if (revision !== viewRevision || processing || job?.id !== previousJobID || unsavedSettingsForms().length) {
-        return;
-      }
-      adopt(result.state);
-      knownVersion = result.version;
-      job = result.job;
+    const status = await api("workspace", { known_version: knownVersion });
+    if (
+      revision !== viewRevision || processing || job?.id !== previousJobID || unsavedSettingsForms().length
+    ) return;
+    if (status.state) {
+      adopt(status.state);
+      knownVersion = status.version;
+      job = status.job;
       preserveScroll(shell);
       if (state.snapshots.at(-1)?.id !== previousSnapshot && state.snapshots.at(-1)?.kind === "daily") {
         notify("毎日の自動更新が完了し、価格と総額の履歴を保存しました。");
@@ -1950,7 +1985,7 @@ setInterval(async () => {
       JSON.stringify(status.job?.fallback) !== previousFallback
     ) {
       job = status.job;
-      preserveScroll(shell);
+      preserveScroll(job?.id === previousJobID ? renderJob : shell);
     }
   } catch {
     /* 一時的な通信失敗は次の定期確認で再試行する */
@@ -1958,11 +1993,17 @@ setInterval(async () => {
     polling = false;
   }
 }, 60000);
-sb.auth.getSession().then(({ data, error }) => {
-  if (error) notify(error.message, true);
-  if (!data.session && !user) loginScreen();
-  else return authChange(data.session);
-}).catch((e) => {
-  loginScreen();
-  notify(e.message, true);
-});
+async function restoreSession() {
+  try {
+    const { auth } = await authClient();
+    const { data, error } = await auth.getSession();
+    if (error) notify(error.message, true);
+    if (data.session || user) await authChange(data.session);
+    else if (!demo) loginScreen();
+  } catch (error) {
+    if (!demo && !user) loginScreen();
+    notify(error.message, true);
+  }
+}
+if (needsAuthClient()) void restoreSession();
+else loginScreen();

@@ -67,6 +67,7 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       const migration of [
         "20261103095704_account_deletion.sql",
         "20261106144459_restrict_tracker_and_scheduler_access.sql",
+        "20261125063816_workspace_performance.sql",
       ]
     ) {
       await db.exec(await Deno.readTextFile(new URL(`../supabase/migrations/${migration}`, import.meta.url)));
@@ -140,6 +141,16 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
     assert(status.job.automatic);
     equal(status.job.total, 3);
     assert(!("state" in status));
+    const workspace = await dispatch(admin, alice, { action: "workspace" });
+    equal(workspace.state.products.length, 3);
+    equal(workspace.job.id, scheduled.id);
+    equal(workspace.quota.remaining, 2);
+    const current = await dispatch(admin, alice, { action: "workspace", known_version: workspace.version });
+    equal(current.state, null);
+    equal(current.job.id, scheduled.id);
+    const other = await dispatch(admin, bob, { action: "workspace" });
+    equal(other.job, null);
+    equal(other.state.settings.daily_enabled, false);
     equal(new Date(scheduled.scheduled_date).toISOString().slice(0, 10), today);
     equal((await sql("select * from public.tracker_jobs where user_id=$1", [bob])).length, 0);
     equal((await sql("select * from public.tracker_jobs where user_id=$1", [empty])).length, 0);
@@ -234,10 +245,18 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
     });
     equal(oldUI.state.settings.daily_hour, 9);
     equal(oldUI.state.settings.daily_enabled, true);
-    await dispatch(admin, alice, {
+    const saved = await dispatch(admin, alice, {
       action: "preferences",
+      include_state: false,
       settings: { interval: 5, max_shops: 15, daily_enabled: true, daily_hour: 23 },
     });
+    assert(!("state" in saved));
+    equal(saved.version, saved.previous_version + 1);
+    const changed = await dispatch(admin, alice, {
+      action: "workspace",
+      known_version: saved.previous_version,
+    });
+    equal(changed.state.settings.daily_hour, 23);
     const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
     equal(await rpc("tracker_daily_enqueue", { p_now: `${tomorrow}T22:59:59+09:00` }), 0);
     equal(await rpc("tracker_daily_enqueue", { p_now: `${tomorrow}T23:00:00+09:00` }), 1);
@@ -258,6 +277,7 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
         "select * from public.tracker_states",
         "select public.tracker_daily_enqueue()",
         "select public.tracker_status('" + alice + "')",
+        "select public.tracker_read_workspace('" + alice + "',null)",
         "select public.tracker_daily_tick()",
         "select public.tracker_daily_target('" + token + "',null)",
         "select * from vault.decrypted_secrets",

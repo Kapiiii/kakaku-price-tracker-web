@@ -1,4 +1,4 @@
-import { copyText, productListText, readShareHash } from "./sharing.js";
+import { copyText, productListText, readShareHash } from "./sharing.js?v=performance";
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
   String(value ?? "").replace(

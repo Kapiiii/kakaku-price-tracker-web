@@ -1,4 +1,4 @@
-import { displayAmount, safeURL, yen } from "./core.js?v=input-validation";
+import { displayAmount, safeURL, yen } from "./core.js?v=performance";
 
 export const escapeHTML = (value) =>
   String(value ?? "").replace(

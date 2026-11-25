@@ -1,4 +1,4 @@
-import { canonicalURL } from "./core.js";
+import { canonicalURL } from "./core.js?v=performance";
 
 export const MAX_SHARE_ITEMS = 100;
 export const MAX_SHARE_URL_LENGTH = 8192;
