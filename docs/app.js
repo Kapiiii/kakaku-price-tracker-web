@@ -2,6 +2,13 @@ import { createClient } from "./vendor/supabase.js";
 import { CONFIG } from "./config.js?v=github-only";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js";
 import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js?v=input-validation";
+import { comparisonPointLabel, renderComparison } from "./comparison-view.js";
+import {
+  HISTORY_PRODUCT_DIALOG_TITLE_ID,
+  renderHistoryProductDialog,
+  renderHistoryProductPicker,
+} from "./history-product-picker.js";
+import { alternative, amount, delta, emptyView, escapeHTML as esc, kindName } from "./view-helpers.js";
 import {
   activeProducts,
   ALL_GROUPS,
@@ -11,13 +18,11 @@ import {
   canonicalURL,
   capMap,
   clone,
-  comparableDelta,
   comparison,
   comparisonPoint,
   csv,
   dateLabel,
   DEFAULT_GROUP,
-  displayAmount,
   editGroups,
   groupView,
   importBackup,
@@ -27,19 +32,12 @@ import {
   priceView,
   productGroupIDs,
   productGroups,
-  productImageURL,
   safeURL,
   shopList,
-  summary,
   yen,
 } from "./core.js?v=input-validation";
 
 const $ = (selector) => document.querySelector(selector);
-const esc = (value) =>
-  String(value ?? "").replace(
-    /[&<>"']/g,
-    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]),
-  );
 const brandMark = '<img class="brand-mark" src="./icon.png" width="40" height="40" alt="">';
 const brand =
   `<div class="brand">${brandMark}<div>PRICE NOTE<small>買い時を、見つけよう。</small></div></div>`;
@@ -78,26 +76,6 @@ function download(name, value, type) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
-const kindName = (kind) => ({
-  add: "商品追加",
-  update: "一括更新",
-  daily: "自動更新",
-  remove: "商品削除",
-  import: "インポート",
-  demo: "デモ更新",
-}[kind] ?? "保存");
-function delta(value) {
-  if (value === null) return "—";
-  const direction = value > 0 ? "increase" : value < 0 ? "decrease" : "";
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "±";
-  return `<span class="delta ${direction}">${sign}${yen(Math.abs(value))}</span>`;
-}
-function amount(s) {
-  return `${yen(displayAmount(s))}${s.total === null ? '<span class="sub">小計</span>' : ""}`;
-}
-function coverage(s) {
-  return `${s.known} / ${s.count} 商品の価格を取得`;
-}
 function quotaExhausted() {
   return manualQuota?.remaining === 0 &&
     (!manualQuota.resets_at || +new Date(manualQuota.resets_at) > Date.now());
@@ -124,15 +102,6 @@ function setManualQuota(value) {
   const delay = +new Date(value?.resets_at) - Date.now();
   if (delay > 0 && delay < 86400001) quotaResetTimer = setTimeout(renderManualQuota, delay + 50);
   renderManualQuota();
-}
-function alternative(offer) {
-  return offer?.product_url
-    ? `<div class="price-small alternative"><a href="${
-      esc(safeURL(offer.product_url))
-    }" target="_blank" rel="noopener noreferrer" title="${esc(offer.product_name)}">${
-      esc(offer.product_name)
-    } ↗</a></div>`
-    : "";
 }
 function fallbackSettings(product) {
   const mode = product.fallback_mode ?? "off";
@@ -633,24 +602,6 @@ function navigateSection(id) {
     $(`[data-section-tab="${id}"]`)?.focus({ preventScroll: true });
   });
 }
-function pointLabel() {
-  return pastId === INITIAL_POINT
-    ? "初回登録時点"
-    : dateLabel(state.snapshots.find((s) => s.id === pastId)?.completed_at);
-}
-function snapshotSelect() {
-  return `<select class="metric-point-select" aria-label="比較する保存時点" title="${
-    esc(pointLabel())
-  }" data-past><option value="${INITIAL_POINT}" ${
-    pastId === INITIAL_POINT ? "selected" : ""
-  }>初回登録時点</option>${
-    [...state.snapshots].reverse().map((s) =>
-      `<option value="${esc(s.id)}" ${s.id === pastId ? "selected" : ""}>${
-        esc(dateLabel(s.completed_at))
-      } · ${kindName(s.kind)}</option>`
-    ).join("")
-  }</select>`;
-}
 function comparisonView(recentCount = 1) {
   const snapshots = state.snapshots.slice(-recentCount);
   if (pastId !== INITIAL_POINT && !snapshots.some((snapshot) => snapshot.id === pastId)) {
@@ -662,112 +613,16 @@ function comparisonView(recentCount = 1) {
 function renderCompare() {
   const previewCount = 30;
   const view = comparisonView(previewCount);
-  const rows = comparison(view, pastId),
-    sums = ["past", "current", "filtered"].map((k) => summary(rows.map((r) => r[k]))),
-    pastDiff = comparableDelta(rows, "current", "past");
-  const currentTrend = pastDiff.count ? ({ "-1": "↘", 0: "→", 1: "↗" })[Math.sign(pastDiff.amount)] : "";
-  const latest = state.snapshots.at(-1), carried = rows.filter((r) => r.carried).length;
-  const estimates = rows.filter((r) => r.capture?.source === "fallback").length;
-  $("#content").innerHTML = `<div class="cards">${
-    ["指定時点の総額", "現在の最安総額", "ショップ除外後の総額"].map((label, i) =>
-      `<article class="metric ${
-        i === 0 ? "reference" : i === 1 ? "current" : ""
-      }"><div class="metric-label"><span>${label}</span>${
-        i === 0 ? snapshotSelect() : `<span aria-hidden="true">${i === 1 ? currentTrend : "⚑"}</span>`
-      }</div><div class="metric-value">${amount(sums[i])}</div><div class="metric-note">${
-        i === 1
-          ? pastDiff.count === 0 && rows.length
-            ? "差額比較できる価格がありません"
-            : `${delta(pastDiff.amount)} ${pastId === INITIAL_POINT ? "初回登録時点比" : "指定時点比"}${
-              pastDiff.count < pastDiff.total ? ` (${pastDiff.count}商品で比較)` : ""
-            }`
-          : i === 2
-          ? `${state.excluded.length} ショップを除外`
-          : pastId === INITIAL_POINT
-          ? "各商品の登録時点の価格を合算"
-          : esc(pointLabel())
-      }<br>${coverage(sums[i])}${
-        i === 0
-          ? rows.some((r) => r.past_is_fallback)
-            ? " · 代替参考価格を含む"
-            : ""
-          : estimates
-          ? ` · 代替 ${estimates}商品`
-          : ""
-      }</div></article>`
-    ).join("")
-  }</div>${
-    estimates
-      ? `<div class="banner warning">${estimates}商品に、条件が合う別商品の<strong>代替参考価格</strong>を使用しています。取得した候補・ショップ内の最安値です。商品名と取得元は詳細から確認できます。「代替価格の条件」で「代替参考価格を使う」をOFFにすると、取得と表示を停止できます。 <button class="small-button banner-settings" data-tab="manage" data-destination="#product-fallback-settings">代替価格の条件を開く</button></div>`
-      : ""
-  }${
-    carried
-      ? `<div class="banner warning">${carried}商品に、最後に取得できた<strong>前回価格</strong>を表示しています。商品詳細で取得日時と理由を確認できます。</div>`
-      : ""
-  }<section class="panel"><div class="panel-header"><div><h2>登録商品 <span class="count">${rows.length}</span></h2><p>最終保存 ${
-    esc(dateLabel(latest?.completed_at))
-  }</p></div><div class="toolbar"><button class="small-button" data-action="compare-csv">CSV保存 ↓</button></div></div>${
-    rows.length
-      ? `<div class="table-scroll"><table class="compare-table"><colgroup><col class="compare-product-column"><col class="compare-price-column"><col class="compare-shop-column"><col class="compare-price-column"><col class="compare-shop-column"><col class="compare-price-column"></colgroup><thead><tr><th scope="col">商品</th><th scope="col" class="numeric">${
-        pastId === INITIAL_POINT ? "初回登録時点" : "指定時点"
-      }</th><th scope="col">現在の販売店</th><th scope="col" class="numeric">現在の最安</th><th scope="col">除外後の販売店</th><th scope="col" class="numeric">除外後の最安</th></tr></thead><tbody>${
-        rows.map((r) =>
-          `<tr><td><div class="product-cell">${
-            r.image_url
-              ? `<img class="product-image" src="${
-                esc(safeURL(r.image_url))
-              }" alt="" loading="lazy" referrerpolicy="no-referrer">`
-              : '<span class="product-image product-placeholder">◇</span>'
-          }<div><span class="product-name" title="${esc(r.name)}">${esc(r.name)}</span><div class="product-sub">${
-            r.carried
-              ? '<span class="tag warn">前回価格</span>'
-              : r.capture
-              ? '<span class="tag">取得済み</span>'
-              : '<span class="tag warn">未取得</span>'
-          }${r.capture?.source === "fallback" ? '<span class="tag warn">代替参考価格</span>' : ""}${
-            r.capture?.source === "html" ? '<span class="tag">保存HTML</span>' : ""
-          }<span>${
-            r.capture?.offers.length ?? 0
-          } ショップ</span></div></div><div class="product-actions"><button type="button" class="product-detail-button" data-product="${esc(r.id)}" aria-label="${
-            esc(r.name)
-          }の詳細を開く">詳細</button><a class="product-source-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" aria-label="${
-            esc(r.name)
-          }を価格.comで見る（新しいタブ）">価格.comで見る <span aria-hidden="true">↗</span></a></div></div></td><td class="numeric"><div class="compare-value"><div class="price-main">${
-            yen(r.past)
-          }</div><div class="price-small">${
-            r.past === null
-              ? "対象外・未取得"
-              : r.past_is_fallback
-              ? "代替参考価格"
-              : pastId === INITIAL_POINT
-              ? "登録時の価格"
-              : "保存時点の価格"
-          }</div></div></td><td><div class="compare-value"><div class="compare-shop-name" title="${esc(r.currentShop)}">${esc(r.currentShop)}</div>${
-            alternative(r.currentOffer)
-          }</div></td><td class="numeric"><div class="compare-value"><div class="price-main">${
-            yen(r.current)
-          }</div><div class="price-small compare-price-change">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
-            delta(
-              r.current !== null && r.past !== null && r.current_basis === r.past_basis
-                ? r.current - r.past
-                : null,
-            )
-          }</div></div></td><td><div class="compare-value"><div class="compare-shop-name" title="${esc(r.filteredShop)}">${esc(r.filteredShop)}</div>${
-            alternative(r.filteredOffer)
-          }</div></td><td class="numeric"><div class="compare-value"><div class="price-main price-filtered">${yen(r.filtered)}</div></div></td></tr>`
-        ).join("")
-      }</tbody></table></div><div class="table-foot">${rows.length} 商品</div><p class="help" data-explanation>小計は価格のある商品のみの合算です。差額は両方の時点で同じ価格種別の商品で比較します。実価格と代替参考価格の切り替わりは値下がりとして計算しません。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</p>`
-      : emptyView()
-  }</section>${
-    state.snapshots.length > 1
-      ? `<section class="panel"><div class="panel-header"><div><h2>総額の動き</h2><p data-explanation>現在の登録商品で比較 · 除外設定は過去分にも適用</p></div><button class="ghost small-button" data-tab="history">履歴をすべて見る →</button></div>${
-        chart(basketHistory({ ...view, snapshots: view.snapshots.slice(-previewCount) }, true))
-      }<div class="legend"><span><i></i>最安価格の合計</span><span><i class="filtered"></i>ショップ除外後</span></div></section>`
-      : ""
-  }`;
-}
-function emptyView() {
-  return `<div class="empty"><span class="empty-icon">＋</span><h2>最初の商品を登録しましょう</h2><p>価格.comの商品ページのURLを貼り付けると、<br>ショップごとの価格と総額の記録がはじまります。</p><button class="primary" data-action="add">商品URLを追加</button></div>`;
+  const historyChart = state.snapshots.length > 1
+    ? chart(basketHistory({ ...view, snapshots: view.snapshots.slice(-previewCount) }, true))
+    : "";
+  $("#content").innerHTML = renderComparison({
+    rows: comparison(view, pastId),
+    snapshots: state.snapshots,
+    point: pastId,
+    excludedCount: state.excluded.length,
+    historyChart,
+  });
 }
 function historyRows() {
   const cutoff = range === "all" ? 0 : Date.now() - Number(range) * 86400000;
@@ -893,14 +748,6 @@ function fallbackProductSelect(products, selectedID) {
     ).join("")
   }</select></label>`;
 }
-function historyProductThumbnail(product) {
-  const url = productImageURL(product.image_url);
-  return `<span class="history-product-thumbnail" aria-hidden="true"><span class="product-image product-placeholder">◇</span>${
-    url
-      ? `<img class="product-image" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-history-product-image>`
-      : ""
-  }</span>`;
-}
 function renderProduct() {
   const p = visibleProducts().find((p) => p.id === selectedProduct);
   if (!p) {
@@ -926,9 +773,9 @@ function renderProduct() {
     shops: () => productOffers(capture),
   };
   $("#content").innerHTML =
-    `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body"><div class="field history-product-field"><span id="history-product-label">履歴を見る商品</span><button type="button" class="history-product-button" data-action="pick-history-product" aria-haspopup="dialog" aria-labelledby="history-product-label history-product-name">${
-      historyProductThumbnail(p)
-    }<span id="history-product-name">${esc(p.name)}</span></button></div><a class="product-name" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${
+    `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body">${
+      renderHistoryProductPicker(p)
+    }<a class="product-name" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${
       esc(p.name)
     } ↗</a><div class="row section-space"><span class="count">${
       esc(
@@ -1264,15 +1111,9 @@ function productCheckboxes(products, selectedID) {
 async function action(name) {
   if (name === "pick-history-product") {
     modal(
-      `<h2 id="history-product-dialog-title">履歴を見る商品</h2><ul class="history-product-options">${
-        visibleProducts().map((product) =>
-          `<li><button type="button" data-history-product="${esc(product.id)}" ${
-            product.id === selectedProduct ? 'aria-current="true" autofocus' : ""
-          }>${historyProductThumbnail(product)}<span>${esc(product.name)}</span></button></li>`
-        ).join("")
-      }</ul><div class="actions"><button type="button" data-close>閉じる</button></div>`,
+      renderHistoryProductDialog(visibleProducts(), selectedProduct),
       "",
-      "history-product-dialog-title",
+      HISTORY_PRODUCT_DIALOG_TITLE_ID,
     );
     return;
   }
@@ -1556,6 +1397,7 @@ async function action(name) {
     return;
   }
   if (name === "compare-csv") {
+    const point = comparisonPointLabel(state.snapshots, pastId);
     download(
       "price-comparison.csv",
       csv(
@@ -1564,7 +1406,7 @@ async function action(name) {
           URL: r.url,
           初回価格: r.initial,
           初回価格種別: r.initial_basis.startsWith("fallback:") ? "代替参考価格" : "登録商品の価格",
-          比較時点: pointLabel(),
+          比較時点: point,
           現在最安価格: r.current,
           指定時点価格: r.past,
           除外後価格: r.filtered,
