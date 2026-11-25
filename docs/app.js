@@ -708,9 +708,9 @@ function renderCompare() {
     esc(dateLabel(latest?.completed_at))
   }</p></div><div class="toolbar"><button class="small-button" data-action="compare-csv">CSV保存 ↓</button></div></div>${
     rows.length
-      ? `<div class="table-scroll"><table class="compare-table"><colgroup><col class="compare-product-column"><col class="compare-reference-column"><col class="compare-price-column"><col class="compare-price-column"></colgroup><thead><tr><th scope="col">商品</th><th scope="col" class="numeric">${
+      ? `<div class="table-scroll"><table class="compare-table"><colgroup><col class="compare-product-column"><col class="compare-price-column"><col class="compare-shop-column"><col class="compare-price-column"><col class="compare-shop-column"><col class="compare-price-column"></colgroup><thead><tr><th scope="col">商品</th><th scope="col" class="numeric">${
         pastId === INITIAL_POINT ? "初回登録時点" : "指定時点"
-      }</th><th scope="col" class="numeric">現在の最安</th><th scope="col" class="numeric">除外後の最安</th></tr></thead><tbody>${
+      }</th><th scope="col">現在の販売店</th><th scope="col" class="numeric">現在の最安</th><th scope="col">除外後の販売店</th><th scope="col" class="numeric">除外後の最安</th></tr></thead><tbody>${
         rows.map((r) =>
           `<tr><td><div class="product-cell">${
             r.image_url
@@ -728,11 +728,11 @@ function renderCompare() {
             r.capture?.source === "html" ? '<span class="tag">保存HTML</span>' : ""
           }<span>${
             r.capture?.offers.length ?? 0
-          } ショップ</span></div><div class="product-actions"><button type="button" class="product-detail-button" data-product="${esc(r.id)}" aria-label="${
+          } ショップ</span></div></div><div class="product-actions"><button type="button" class="product-detail-button" data-product="${esc(r.id)}" aria-label="${
             esc(r.name)
           }の詳細を開く">詳細</button><a class="product-source-link" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" aria-label="${
             esc(r.name)
-          }を価格.comで見る（新しいタブ）">価格.comで見る <span aria-hidden="true">↗</span></a></div></div></div></td><td class="numeric"><div class="price-main">${
+          }を価格.comで見る（新しいタブ）">価格.comで見る <span aria-hidden="true">↗</span></a></div></div></td><td class="numeric"><div class="price-main">${
             yen(r.past)
           }</div><div class="price-small">${
             r.past === null
@@ -742,21 +742,19 @@ function renderCompare() {
               : pastId === INITIAL_POINT
               ? "登録時の価格"
               : "保存時点の価格"
-          }</div></td><td class="numeric"><div class="price-main">${
-            yen(r.current)
-          }</div><div class="price-small" title="${esc(r.currentShop)}">${esc(r.currentShop)}</div>${
+          }</div></td><td><div class="compare-shop-name" title="${esc(r.currentShop)}">${esc(r.currentShop)}</div>${
             alternative(r.currentOffer)
-          }<div class="price-small compare-price-change">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
+          }</td><td class="numeric"><div class="price-main">${
+            yen(r.current)
+          }</div><div class="price-small compare-price-change">${pastId === INITIAL_POINT ? "初回比" : "指定時点比"} ${
             delta(
               r.current !== null && r.past !== null && r.current_basis === r.past_basis
                 ? r.current - r.past
                 : null,
             )
-          }</div></td><td class="numeric"><div class="price-main price-filtered">${
-            yen(r.filtered)
-          }</div><div class="price-small" title="${esc(r.filteredShop)}">${esc(r.filteredShop)}</div>${
+          }</div></td><td><div class="compare-shop-name" title="${esc(r.filteredShop)}">${esc(r.filteredShop)}</div>${
             alternative(r.filteredOffer)
-          }</td></tr>`
+          }</td><td class="numeric"><div class="price-main price-filtered">${yen(r.filtered)}</div></td></tr>`
         ).join("")
       }</tbody></table></div><div class="table-foot">${rows.length} 商品</div><p class="help" data-explanation>小計は価格のある商品のみの合算です。差額は両方の時点で同じ価格種別の商品で比較します。実価格と代替参考価格の切り替わりは値下がりとして計算しません。<br>「初回登録時点」は各商品の初回登録そのものの記録です。登録時に未取得だった商品は、その後取得できても初回価格を埋めません。</p>`
       : emptyView()

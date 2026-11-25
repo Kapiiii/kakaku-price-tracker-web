@@ -965,45 +965,65 @@ th.numeric {
   font-variant-numeric: tabular-nums;
 }
 .compare-table {
-  min-width: 620px;
+  min-width: 680px;
   table-layout: fixed;
 }
 .compare-product-column {
-  width: 40%;
+  width: 31%;
 }
-.compare-reference-column {
-  width: 18%;
+.compare-shop-column {
+  width: 12%;
 }
 .compare-price-column {
-  width: 21%;
+  width: 15%;
 }
 .compare-table tbody tr {
   height: 142px;
+}
+.compare-table th,
+.compare-table td {
+  text-align: center;
 }
 .compare-table td {
   vertical-align: top;
   padding-block: 16px;
 }
 .compare-table .price-main {
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .compare-table .price-small {
   max-width: none;
 }
+.compare-shop-name {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 24px;
+}
 .compare-table .alternative,
+.compare-shop-name,
 .compare-price-change {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.compare-table .alternative {
+.compare-table .alternative,
+.compare-shop-name {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .product-cell {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: auto minmax(0,1fr);
+  gap: 7px 12px;
+  align-items: start;
+  justify-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
 }
 .product-cell > div {
   min-width: 0;
@@ -1089,6 +1109,7 @@ th.numeric {
 .product-sub {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 5px;
   font-size: 11px;
@@ -1101,8 +1122,9 @@ th.numeric {
 .product-actions {
   display: flex;
   flex-wrap: wrap;
+  grid-column: 1 / -1;
+  justify-content: center;
   gap: 6px;
-  margin-top: 7px;
 }
 .product-detail-button,
 .product-source-link {
@@ -1632,8 +1654,11 @@ details summary {
   .compare-table td {
     padding-inline: 12px;
   }
+  .compare-table .numeric {
+    padding-inline: 8px;
+  }
   .compare-table .product-cell {
-    gap: 9px;
+    column-gap: 9px;
   }
   .compare-table .product-image {
     width: 40px;
