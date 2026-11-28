@@ -1,6 +1,11 @@
+import { brand, loginScreen, showFeature } from "./login-view.js";
+import { chart } from "./price-chart.js";
+import { productHistory, productOffers } from "./product-prices.js";
 import { authStorageKey, CONFIG, needsAuthClient } from "./config.js?v=performance";
 import { copyText, createShareURL, productListText, shareItems } from "./sharing.js?v=performance";
-import { categoryURL, priceBasis, productFallbackURL } from "./fallback.js";
+import { categoryURL, productFallbackURL } from "./fallback.js";
+import { mergePreferences } from "./preferences.js";
+import { loadWorkspace } from "./workspace.js";
 import { comparisonPointLabel, renderComparison } from "./comparison-view.js?v=performance";
 import {
   HISTORY_PRODUCT_DIALOG_TITLE_ID,
@@ -38,15 +43,11 @@ import {
   priceView,
   productGroupIDs,
   productGroups,
-  safeURL,
   shopList,
   yen,
 } from "./core.js?v=performance";
 
 const $ = (selector) => document.querySelector(selector);
-const brandMark = '<img class="brand-mark" src="./icon.png" width="40" height="40" alt="">';
-const brand =
-  `<div class="brand">${brandMark}<div>PRICE NOTE<small>買い時を、見つけよう。</small></div></div>`;
 const securityIntentKey = "price-note:security-intent";
 const hasOAuthCallback = new URLSearchParams(location.search).has("code");
 let authClientPromise;
@@ -75,8 +76,9 @@ let tab = "compare",
   shopSearch = "",
   fixed = false,
   range = "all";
-let noticeTimer, prefsTimer, prefsPending = false, prefsInFlight = 0, prefsChain = Promise.resolve();
+let noticeTimer, prefsTimer, prefsPending = null, prefsInFlight = 0, prefsChain = Promise.resolve();
 let viewRevision = 0, polling = false, knownVersion = null;
+let historyCache = {};
 let manualQuota = null, quotaResetTimer, refreshStarting = false, refreshPrompt = null;
 let shareDraft = null;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -162,6 +164,19 @@ function fallbackFields(mode, url = "") {
   } placeholder="https://kakaku.com/pc/videocard/itemlist.aspx?pdf_Spec103=499"></label></div>`;
 }
 async function api(action, values = {}) {
+  const started = epoch;
+  const request = (name, params = {}) => {
+    if (epoch !== started) throw new Error("アカウントが切り替わりました。");
+    return requestAPI(name, params);
+  };
+  const result = await request(action, values);
+  if (result.state?.reload_workspace) {
+    const workspace = await loadWorkspace(null, request, historyCache);
+    return { ...result, state: workspace.state };
+  }
+  return result.history_paged ? await loadWorkspace(result, request, historyCache) : result;
+}
+async function requestAPI(action, values) {
   const requestEpoch = epoch, owner = user?.id;
   const { auth } = await authClient();
   const session = (await auth.getSession()).data.session;
@@ -178,7 +193,7 @@ async function api(action, values = {}) {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ action, ...values }),
+    body: JSON.stringify({ action, ...values, paged: true }),
     redirect: "error",
     signal: AbortSignal.timeout(115000),
   });
@@ -296,10 +311,10 @@ function adopt(next) {
   }
   ensureSelectedProduct();
 }
-function queuePrefs() {
+function queuePrefs(patch) {
   viewRevision++;
   if (demo) return;
-  prefsPending = true;
+  prefsPending = mergePreferences(prefsPending ?? {}, patch);
   clearTimeout(prefsTimer);
   prefsTimer = setTimeout(() => {
     flushPrefs().catch((e) => notify(`設定を保存できませんでした。${e.message}`, true));
@@ -308,18 +323,20 @@ function queuePrefs() {
 async function flushPrefs() {
   clearTimeout(prefsTimer);
   if (prefsPending && state && !demo) {
-    prefsPending = false;
-    const values = { excluded: [...state.excluded], settings: { ...state.settings } }, currentEpoch = epoch;
+    const currentEpoch = epoch;
     prefsInFlight++;
     prefsChain = prefsChain.catch(() => {}).then(async () => {
       if (epoch !== currentEpoch) return;
+      const values = prefsPending;
+      prefsPending = null;
       try {
+        if (!values) return;
         const result = await api("preferences", { ...values, include_state: false });
         if (result.previous_version != null && result.previous_version === knownVersion) {
           knownVersion = result.version;
         }
       } catch (e) {
-        if (epoch === currentEpoch) prefsPending = true;
+        if (epoch === currentEpoch) prefsPending = mergePreferences(values, prefsPending ?? {});
         throw e;
       } finally {
         if (epoch === currentEpoch) prefsInFlight--;
@@ -327,86 +344,6 @@ async function flushPrefs() {
     });
   }
   await prefsChain;
-}
-const loginFeatures = [
-  {
-    title: "買い物リストの総額を比べる",
-    description: "指定した時点・現在・ショップ除外後の総額を、ひとつの画面で比較。",
-    preview:
-      `<div class="feature-preview feature-prices"><div><small>指定時点</small><strong>¥74,580</strong></div><div><small>現在の最安</small><strong>¥69,760</strong></div><div><small>ショップ除外後</small><strong>¥70,870</strong></div></div>`,
-  },
-  {
-    title: "値動きから買い時を探す",
-    description: "商品ごと、リスト全体のどちらもグラフで確認。毎日の自動更新で価格がたまります。",
-    preview:
-      `<div class="feature-preview feature-trend"><div><small>リストの総額</small><strong>¥69,760</strong><span>↘ ¥4,820</span></div><svg viewBox="0 0 250 74" preserveAspectRatio="none"><path d="M2 8L44 17L84 12L126 43L168 35L206 56L248 62V74H2Z" fill="currentColor" opacity=".12"/><path d="M2 8L44 17L84 12L126 43L168 35L206 56L248 62" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="248" cy="62" r="3" fill="currentColor"/></svg></div>`,
-  },
-  {
-    title: "用途別にまとめて管理",
-    description: "「自作PC」や「新生活」など、好きな名前でグループを作成。商品URLのリストも共有できます。",
-    preview:
-      `<div class="feature-preview feature-list"><div><span>▦　自作PC</span><small>3 商品</small></div><div><span>▦　新生活</span><small>5 商品</small></div><div><span>↗　商品URLリストを共有</span></div></div>`,
-  },
-  {
-    title: "価格が取れないときも見積もる",
-    description: "条件が合う別商品の価格を参考に。利用のON・OFFや候補の条件は設定できます。",
-    preview:
-      `<div class="feature-preview feature-alternative"><small>参考見積もり</small><strong>¥18,980</strong><span>代替参考価格</span><small>例　同じ容量・形状のSSD</small></div>`,
-  },
-];
-function featureCarousel() {
-  const paused = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  return `<section class="feature-carousel" ${
-    paused ? "data-feature-paused" : ""
-  } aria-label="PRICE NOTEの機能紹介" aria-roledescription="カルーセル">
-    <div class="feature-carousel-header">機能紹介 · 表示はサンプル</div>
-    <div class="feature-stage" aria-live="${paused ? "polite" : "off"}">${
-    loginFeatures.map((feature, index) =>
-      `<article class="feature-slide" data-feature-slide ${index ? "hidden" : ""}>
-        <h2>${feature.title}</h2><p>${feature.description}</p>
-        <div aria-hidden="true">${feature.preview}</div>
-      </article>`
-    ).join("")
-  }</div>
-    <div class="feature-timing"><div class="feature-progress" aria-hidden="true"><span></span></div>
-      <button type="button" data-feature-playback>${paused ? "自動再生" : "一時停止"}</button>
-    </div>
-    <div class="feature-controls">
-      <button type="button" data-feature="previous" aria-label="前の機能">←</button>
-      <div class="feature-dots" role="group" aria-label="紹介する機能を選ぶ">${
-    loginFeatures.map((feature, index) =>
-      `<button type="button" data-feature="${index}" aria-label="${feature.title}" aria-current="${
-        index === 0
-      }"></button>`
-    ).join("")
-  }</div>
-      <button type="button" data-feature="next" aria-label="次の機能">→</button>
-    </div>
-  </section>`;
-}
-function showFeature(choice) {
-  const slides = [...document.querySelectorAll("[data-feature-slide]")];
-  const current = slides.findIndex((slide) => !slide.hidden);
-  const index = choice === "next"
-    ? (current + 1) % slides.length
-    : choice === "previous"
-    ? (current + slides.length - 1) % slides.length
-    : Number(choice);
-  slides.forEach((slide, i) => {
-    slide.hidden = i !== index;
-  });
-  document.querySelectorAll(".feature-dots button").forEach((button, i) => {
-    button.setAttribute("aria-current", String(i === index));
-  });
-  const progress = $(".feature-progress span");
-  progress?.replaceWith(progress.cloneNode());
-}
-function loginScreen() {
-  $("#app").innerHTML =
-    `<main class="login"><section class="login-story">${brand}<div><h1>欲しいものを並べて、<br>買い時を見つける。</h1><p>ひとつずつの値動きも、まとめて買うときの総額も。<br>あなたの買い物リストに、価格の記録を。</p>${featureCarousel()}</div><footer>ひとつのリストから、納得できるお買い物へ。</footer></section><section class="login-action"><div class="login-box"><h2>自分だけの価格ノートを。</h2><p>ログインすると、登録した商品と価格の履歴を<br>どの端末からでも確認できます。</p><button class="primary" data-action="login">GitHubでログイン / はじめる →</button><button data-action="demo">デモを見てみる</button><p class="fine">商品リストはログインした本人だけが閲覧できます。<br>価格.comの商品URLを登録し、ボタンを押して最新価格を取得します。毎日1回の自動更新と、ボタンでの手動更新に対応しています。</p><hr><p class="fine">PRICE NOTE は価格.comの非公式ツールです。<br>表示価格・送料・在庫は購入前に各ショップでご確認ください。</p></div></section></main>`;
-  $(".feature-carousel").addEventListener("animationend", (event) => {
-    if (event.animationName === "feature-countdown") showFeature("next");
-  });
 }
 function accountName() {
   if (demo) return "ゲスト";
@@ -726,77 +663,6 @@ function historyRows() {
     +new Date(r.date) >= cutoff && (groupID === ALL_GROUPS || fixed || r.raw.count > 0)
   );
 }
-function chart(records, label = "保存時点ごとの総額推移") {
-  const rows = records;
-  if (!rows.some((r) => r.value !== null || r.filteredValue !== null)) {
-    return '<div class="empty"><p>価格を取得すると推移が表示されます。</p></div>';
-  }
-  const width = 900,
-    height = 250,
-    left = 76,
-    right = 30,
-    top = 25,
-    bottom = 45,
-    values = rows.flatMap((r) => [r.value, r.filteredValue].filter((v) => v !== null));
-  const min = Math.min(...values),
-    max = Math.max(...values),
-    padding = Math.max((max - min) * .2, max * .015, 100),
-    low = Math.max(0, min - padding),
-    high = max + padding;
-  const times = rows.map((r) => +new Date(r.date)), start = Math.min(...times), end = Math.max(...times);
-  const dates = rows.map((r) => esc(dateLabel(r.date)));
-  const x = (i) =>
-      left +
-      (start === end
-        ? (width - left - right) / 2
-        : (times[i] - start) / (end - start) * (width - left - right)),
-    y = (v) => top + (high - v) / (high - low) * (height - top - bottom);
-  let svg = `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${
-    esc(label)
-  }。詳細値は下の履歴表に表示しています。">`;
-  for (let n = 0; n < 4; n++) {
-    const v = low + (high - low) * n / 3;
-    svg += `<line class="axis" x1="${left}" x2="${width - right}" y1="${y(v)}" y2="${y(v)}"/><text x="${
-      left - 12
-    }" y="${y(v) + 4}" text-anchor="end">${esc(yen(Math.round(v)))}</text>`;
-  }
-  for (
-    const [key, segment, summaryKey, marker, seriesLabel] of [
-      ["value", "rawSegment", "raw", "circle", "最安価格"],
-      ["filteredValue", "filteredSegment", "filtered", "rect", "ショップ除外後"],
-    ]
-  ) {
-    const series = `series-${summaryKey}`;
-    let previous = null;
-    rows.forEach((r, i) => {
-      if (r[key] === null) {
-        previous = null;
-        return;
-      }
-      const xx = x(i), yy = y(r[key]);
-      if (previous && r[segment] === previous.r[segment]) {
-        svg += `<path class="chart-line ${series}" ${
-          r.estimate || r[summaryKey].total === null ? 'stroke-dasharray="5 5"' : ""
-        } d="M${previous.x},${previous.y} L${xx},${yy}"/>`;
-      }
-      const position = marker === "circle"
-        ? `cx="${xx}" cy="${yy}" r="4.5"`
-        : `x="${xx - 3}" y="${yy - 3}" width="6" height="6" rx="1"`;
-      svg += `<${marker} class="chart-point ${series}${r.estimate ? " estimate" : ""}" ${position}><title>${seriesLabel} · ${dates[i]} · ${esc(yen(r[key]))}${
-        r[summaryKey].total === null ? "（小計）" : ""
-      }${r.note ? `（${esc(r.note)}）` : ""}</title></${marker}>`;
-      previous = { r, x: xx, y: yy };
-    });
-  }
-  const ticks = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
-  for (const i of ticks) {
-    svg += `<text x="${x(i)}" y="${height - 14}" text-anchor="middle">${dates[i].slice(0, 10)}</text>`;
-  }
-  const equalPrices = rows.every((r) => r.value === r.filteredValue);
-  return `<div class="chart-wrap">${svg}</svg></div>${
-    equalPrices ? '<p class="chart-note">この表示範囲では、最安価格とショップ除外後の価格が同じです。</p>' : ""
-  }`;
-}
 function renderHistory() {
   const records = historyRows(),
     known = records.filter((r) => r.value !== null),
@@ -866,7 +732,7 @@ function renderProduct() {
   const error = state.snapshots.at(-1)?.items.findLast((item) => String(item.product_id) === pid)?.error;
   const renderSection = {
     history: () => productHistory(view),
-    shops: () => productOffers(capture),
+    shops: () => productOffers(capture, state.excluded),
   };
   $("#content").innerHTML =
     `<section class="panel"><div class="panel-header"><h2>商品を選択</h2></div><div class="panel-body">${
@@ -907,77 +773,6 @@ function renderProduct() {
       ).join("")
     }`;
 }
-function productOffers(capture) {
-  const excluded = new Set(state.excluded);
-  return `<section class="panel" data-page-section="shops"><div class="panel-header"><h2>${
-    capture?.source === "fallback" ? "代替候補のショップ別価格" : "最新のショップ別価格"
-  }</h2><span class="count">${
-    capture?.offers.length ?? 0
-  } ショップ</span></div><div class="table-scroll"><table><thead><tr><th>除外</th><th>ショップ</th><th class="numeric">価格</th><th>送料・在庫</th></tr></thead><tbody>${
-    (capture?.offers ?? []).map((o) =>
-      `<tr class="shop-offer ${excluded.has(o.shop_key) ? "excluded" : ""}"><td><input aria-label="${
-        esc(o.shop_name)
-      }を除外" type="checkbox" data-shop="${esc(o.shop_key)}" ${
-        excluded.has(o.shop_key) ? "checked" : ""
-      }></td><td>${
-        o.shop_url
-          ? `<a href="${esc(safeURL(o.shop_url))}" target="_blank" rel="noopener noreferrer">${
-            esc(o.shop_name)
-          }</a>`
-          : esc(o.shop_name)
-      }${alternative(o)}${
-        o.product_fetched_at ? `<div class="price-small">${esc(dateLabel(o.product_fetched_at))}</div>` : ""
-      }</td><td class="numeric">${yen(o.price)}</td><td><small>${esc(o.shipping_text)} ${
-        esc(o.stock_text)
-      }</small></td></tr>`
-    ).join("") || '<tr><td colspan="4">店舗別価格はまだありません。</td></tr>'
-  }</tbody></table></div></section>`;
-}
-function productHistory(view) {
-  const captures = capMap(view), offers = offerLookup(view.excluded);
-  const records = view.snapshots.map(({ completed_at, items: [item] }) => {
-    const saved = captures.get(String(item.capture_id));
-    const { raw, filtered } = offers(saved);
-    const value = raw?.price ?? null, filteredValue = filtered?.price ?? null;
-    const estimate = saved?.source === "fallback";
-    const carried = saved && ["carried", "error"].includes(item.status);
-    const note = [estimate ? "代替参考価格" : "", carried ? "前回価格の引継ぎ" : ""].filter(Boolean).join(
-      "・",
-    );
-    const basis = priceBasis(saved);
-    return {
-      date: completed_at,
-      item,
-      saved,
-      value,
-      filteredValue,
-      estimate,
-      note,
-      rawSegment: basis,
-      filteredSegment: basis,
-      raw: { total: value },
-      filtered: { total: filteredValue },
-    };
-  });
-  return `<section class="panel section-space" data-page-section="history"><div class="panel-header"><div><h2>この商品の価格推移</h2><p data-explanation>保存時点ごとの価格です。実価格と代替参考価格の間は線を分けています。</p></div></div>${
-    chart(records, "保存時点ごとの商品価格推移")
-  }<div class="legend"><span><i></i>最安価格</span><span><i class="filtered"></i>ショップ除外後</span><span>中抜きの点・破線：代替参考価格</span></div></section><section class="panel" data-page-section="history"><div class="panel-header"><h2>保存時点ごとの価格</h2></div><div class="table-scroll"><table><thead><tr><th>保存日時</th><th class="numeric">最安価格</th><th class="numeric">除外後</th><th>状態</th></tr></thead><tbody>${
-    [...records].reverse().map(({ date, item, saved: c, value, filteredValue }) =>
-      `<tr><td><small>${esc(dateLabel(date))}</small></td><td class="numeric">${
-        yen(value)
-      }</td><td class="numeric">${yen(filteredValue)}</td><td><span class="tag ${
-        c?.source === "fallback" || ["error", "carried", "missing"].includes(item.status) ? "warn" : ""
-      }">${
-        c?.source === "fallback" ? `代替参考価格${item.status === "error" ? "・前回" : ""}` : {
-          fresh: "取得",
-          carried: "引継ぎ",
-          missing: "未取得",
-          error: c ? "前回価格" : "未取得",
-        }[item.status]
-      }</span></td></tr>`
-    ).join("") || '<tr><td colspan="4">価格の記録はまだありません。</td></tr>'
-  }</tbody></table></div></section>`;
-}
 function productFallbackSettings(products) {
   const product = products.find((p) => p.id === selectedFallbackProduct) ??
     products.find((p) => p.id === selectedProduct) ?? products[0];
@@ -1015,7 +810,7 @@ function renderManage() {
         `<option value="${hour}" ${(state.settings.daily_hour ?? 9) === hour ? "selected" : ""}>毎日 ${
           String(hour).padStart(2, "0")
         }:00</option>`).join("")
-    }</select></label><p class="help" data-explanation="daily"><strong>毎日の自動更新</strong><br>PC・ブラウザーを開いていなくても更新します。1分ごとに商品・代替候補を1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><div class="field"><div class="field-label" data-info-anchor="interval" data-info-title="商品ページへのアクセス間隔（秒）"><label for="fetch-interval">商品ページへのアクセス間隔（秒）</label></div><input id="fetch-interval" type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></div><label class="field">保持するショップ数<select name="max_shops">${
+    }</select></label><p class="help" data-explanation="daily"><strong>毎日の自動更新</strong><br>PC・ブラウザーを開いていなくても更新します。20秒ごとに全利用者の待ち行列から商品・代替候補を最大1件ずつ順番に取得し、全商品の処理が終わると総額の履歴を保存します。代替候補が多い場合や混雑時は開始・完了が遅れる場合があります。OFFにすると次回から停止します。</p><hr><div class="field"><div class="field-label" data-info-anchor="interval" data-info-title="商品ページへのアクセス間隔（秒）"><label for="fetch-interval">商品ページへのアクセス間隔（秒）</label></div><input id="fetch-interval" type="number" name="interval" min="3" max="30" step="1" value="${state.settings.interval}" required></div><label class="field">保持するショップ数<select name="max_shops">${
       [10, 15, 20].map((v) => `<option ${state.settings.max_shops === v ? "selected" : ""}>${v}</option>`)
         .join("")
     }</select></label><p class="help" data-explanation="interval"><strong>アクセス間隔</strong><br>最短3秒。ほかの利用者の取得と重なる場合は、さらに待機します。サイトからアクセス制限を受けると、残りの取得を停止します。</p><button type="submit" class="primary">設定を保存</button></form></div></section><section class="panel" data-page-section="backup"><div class="panel-header"><h2>バックアップと移行</h2></div><div class="panel-body"><p class="help" data-explanation>登録商品、全ショップの価格、履歴、除外設定をJSONファイルで保存できます。以前のローカル版のJSONバックアップも復元できます。</p><div class="row"><button data-action="export">バックアップを保存 ↓</button><button data-action="import" ${
@@ -1383,7 +1178,7 @@ async function action(name) {
     $("#modal").close();
     epoch++;
     clearTimeout(prefsTimer);
-    prefsPending = false;
+    prefsPending = null;
     prefsInFlight = 0;
     state = null;
     job = null;
@@ -1394,7 +1189,7 @@ async function action(name) {
   }
   if (name === "clear-excluded") {
     state.excluded = [];
-    queuePrefs();
+    queuePrefs({ excluded: [] });
     refreshExcluded();
     return;
   }
@@ -1691,7 +1486,7 @@ document.addEventListener("change", (event) => {
     const keys = new Set(state.excluded);
     node.checked ? keys.add(node.dataset.shop) : keys.delete(node.dataset.shop);
     state.excluded = [...keys];
-    queuePrefs();
+    queuePrefs({ shop_changes: [[node.dataset.shop, node.checked]] });
     refreshExcluded();
   }
   if (node.hasAttribute("data-group")) {
@@ -1704,7 +1499,7 @@ document.addEventListener("change", (event) => {
   if (node.hasAttribute("data-past")) {
     state.settings.comparison_point = node.value;
     pastId = comparisonPoint(state);
-    queuePrefs();
+    queuePrefs({ settings: { comparison_point: node.value } });
     renderContent();
     $("[data-past]")?.focus();
     flushPrefs().catch((e) => notify(`比較時点を保存できませんでした。${e.message}`, true));
@@ -1803,8 +1598,6 @@ async function saveForm(form) {
       await flushPrefs();
       const settings = globalFallback
         ? {
-          interval: state.settings.interval,
-          max_shops: state.settings.max_shops,
           fallback_enabled: data.get("fallback_enabled") === "on",
         }
         : {
@@ -1813,7 +1606,8 @@ async function saveForm(form) {
           daily_enabled: data.get("daily_enabled") === "on",
           daily_hour: Number(data.get("daily_hour")),
         };
-      if (!demo) await api("preferences", { settings });
+      const changed = Object.fromEntries(Object.entries(settings).filter(([key, value]) => state.settings[key] !== value));
+      if (!demo && Object.keys(changed).length) await api("preferences", { settings: changed, include_state: false });
       state.settings = { ...state.settings, ...settings };
       viewRevision++;
       if (globalFallback) renderSettingsAfterSave(form);
@@ -1907,13 +1701,14 @@ async function authChange(session) {
   state = null;
   manualQuota = null;
   knownVersion = null;
+  historyCache = {};
   refreshStarting = false;
   clearTimeout(quotaResetTimer);
   job = null;
   processing = false;
   demo = false;
   user = next;
-  prefsPending = false;
+  prefsPending = null;
   prefsInFlight = 0;
   clearTimeout(prefsTimer);
   $("#modal").close();

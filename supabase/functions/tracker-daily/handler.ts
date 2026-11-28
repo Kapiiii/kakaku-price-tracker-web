@@ -1,5 +1,5 @@
 import { createSupabaseContext } from "npm:@supabase/server@1.9.2";
-import { dispatch } from "../tracker-api/handler.ts";
+import { stepJob } from "../tracker-api/job-step.ts";
 import { readJSONRequest, RequestError, UUID_PATTERN } from "../_shared/request.ts";
 type Client = any;
 async function makeAdmin() {
@@ -12,7 +12,7 @@ async function makeAdmin() {
 export async function dailyHandler(
   req: Request,
   getAdmin: () => Promise<Client> = makeAdmin,
-  process = dispatch,
+  process = stepJob,
 ): Promise<Response> {
   const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (req.method !== "POST") return Response.json({ error: "POST required" }, { status: 405, headers });
@@ -45,7 +45,7 @@ export async function dailyHandler(
     if (!target?.authorized) return Response.json({ error: "Unauthorized" }, { status: 401, headers });
     if (body.probe === true) return Response.json({ ok: true }, { headers });
     if (!target.job) return Response.json({ error: "Job not found" }, { status: 404, headers });
-    const result = await process(admin, target.job.user_id, { action: "step", job_id: target.job.id });
+    const result = await process(admin, target.job.user_id, target.job.id);
     return Response.json({
       ok: true,
       busy: !!result.busy,

@@ -1,3 +1,12 @@
+import {
+  type Client,
+  mutateWithVersion,
+  publicJob,
+  readState,
+  rpc,
+  runningJob,
+  workingState,
+} from "./storage.ts";
 import { createSupabaseContext } from "npm:@supabase/server@1.9.2";
 import {
   activeProducts,
@@ -5,55 +14,20 @@ import {
   applyResults,
   archiveProducts,
   canonicalURL,
-  clone,
-  comparisonPoint,
-  DEFAULT_GROUP,
   editGroups,
   importBackup,
   INITIAL_POINT,
-  productGroups,
   requireGroup,
   shopList,
 } from "../../../docs/core.js";
 import { fetchCategory, fetchProduct, parseProduct, PriceError } from "../_shared/kakaku.ts";
-import { advanceFallback } from "../_shared/fallback-step.ts";
+import { stepJob } from "./job-step.ts";
 import { readJSONRequest, RequestError, UUID_PATTERN } from "../_shared/request.ts";
-import { categoryURL, productFallbackURL } from "../../../docs/fallback.js";
+import { categoryURL } from "../../../docs/fallback.js";
 
-type Client = any;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export function allowedOrigin(origin: string, developmentOrigin = "") {
   return origin === "https://kapiiii.github.io" ||
     (origin === developmentOrigin && /^http:\/\/(localhost|127\.0\.0\.1):[1-9]\d{0,4}$/.test(origin));
-}
-const fetchBudgetError = "本日の価格取得上限に達しました。日本時間の翌日0時以降にお試しください。";
-const expectedDatabaseErrors = new Map([
-  ["更新中です。完了後に操作してください。", 409],
-  ["先に実行中の更新を再開または中止してください。", 409],
-  ["更新処理が見つかりません。", 404],
-  ["更新は中止済みか、別の画面で処理されています。", 409],
-  ["次の更新まで30秒ほどお待ちください。", 429],
-  ["取得が混み合っています。時間をおいて再実行してください。", 429],
-  ["手動の一括更新は1日2回までです。日本時間の翌日0時以降に再度お試しください。", 429],
-  [fetchBudgetError, 429],
-  ["他の画面で変更されました。画面を再読み込みしてお試しください。", 409],
-]);
-function databaseError(operation: string, error: { code?: string; message?: string }) {
-  const status = expectedDatabaseErrors.get(error.message ?? "");
-  if (status && (!error.code || error.code === "P0001")) return new RequestError(error.message!, status);
-  if (["42883", "42P01", "PGRST202", "PGRST205"].includes(error.code ?? "")) {
-    return new RequestError("データベースの初期設定が必要です。管理者にご連絡ください。", 503);
-  }
-  if (error.code === "23514" && /tracker_(state|job)_object/.test(error.message ?? "")) {
-    return new RequestError("保存できるデータ量を超えています。", 413);
-  }
-  // Do not log database messages, which can contain request data or credentials.
-  console.error(
-    "Tracker database operation failed",
-    operation,
-    /^[A-Z0-9]{5,8}$/.test(error.code ?? "") ? error.code : "unknown",
-  );
-  return new RequestError("データの読み込み・保存に失敗しました。", 500);
 }
 function validateInput<T>(parse: () => T): T {
   try {
@@ -65,70 +39,6 @@ function validateInput<T>(parse: () => T): T {
       : "入力データの形式を確認してください。";
     throw new RequestError(message);
   }
-}
-async function rpc(admin: Client, name: string, args: Record<string, unknown>) {
-  const { data, error } = await admin.rpc(name, args);
-  if (error) throw databaseError(name, error);
-  return data;
-}
-async function runningJob(admin: Client, owner: string) {
-  const { data, error } = await admin.from("tracker_jobs").select(
-    "id,kind,status,created_at,origin,scheduled_date,payload",
-  ).eq("user_id", owner).eq(
-    "status",
-    "running",
-  ).limit(1).maybeSingle();
-  if (error) throw databaseError("running-job", error);
-  return data;
-}
-function publicJob(job: any) {
-  return job
-    ? {
-      id: job.id,
-      kind: job.kind,
-      status: job.status,
-      done: job.payload.index,
-      total: job.payload.urls.length,
-      created_at: job.created_at,
-      automatic: job.origin === "daily",
-      scheduled_date: job.scheduled_date ?? null,
-      fallback: job.payload.pendingFallback
-        ? {
-          name: job.payload.pendingFallback.original_name,
-          checked: job.payload.pendingFallback.index,
-          total: job.payload.pendingFallback.candidates?.length ?? null,
-        }
-        : null,
-      errors: job.payload.results.filter((r: any) => r.error).map((r: any) => ({
-        url: r.url,
-        error: r.error,
-      })),
-    }
-    : null;
-}
-async function readState(admin: Client, owner: string) {
-  return await rpc(admin, "tracker_ensure_state", { p_owner: owner });
-}
-async function mutateWithVersion(
-  admin: Client,
-  owner: string,
-  transform: (data: any) => any,
-  allowRunning = false,
-) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const row = await readState(admin, owner), state = transform(clone(row.data));
-    const ok = await rpc(admin, "tracker_write_state", {
-      p_owner: owner,
-      p_expected: row.version,
-      p_data: state,
-      p_allow_running: allowRunning,
-    });
-    if (ok) return { state, previous_version: row.version, version: Number(row.version) + 1 };
-  }
-  throw new RequestError("他の画面で変更されました。画面を再読み込みしてお試しください。", 409);
-}
-async function mutate(admin: Client, owner: string, transform: (data: any) => any) {
-  return (await mutateWithVersion(admin, owner, transform)).state;
 }
 function validID(value: unknown): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
@@ -167,18 +77,34 @@ export async function dispatch(
   productFetcher = fetchProduct,
   categoryFetcher = fetchCategory,
 ): Promise<any> {
+  const paged = body.paged === true;
+  const mutate = async (transform: (state: any) => any) =>
+    (await mutateWithVersion(admin, owner, transform, false, paged)).state;
   switch (body.action) {
+    case "history-page": {
+      if (
+        !["captures", "snapshots"].includes(body.kind) || !Number.isSafeInteger(body.after) ||
+        body.after < 0 ||
+        !Number.isSafeInteger(body.version) || body.version < 0
+      ) throw new RequestError("履歴の位置を確認してください。");
+      return await rpc(admin, "tracker_history_page", {
+        p_owner: owner,
+        p_version: body.version,
+        p_kind: body.kind,
+        p_after: body.after,
+      });
+    }
     case "workspace": {
       const version = body.known_version;
       if (version != null && (!Number.isSafeInteger(version) || version < 0)) {
         throw new RequestError("保存状態の版を確認してください。");
       }
-      const result = await rpc(admin, "tracker_read_workspace", {
+      const result = await rpc(admin, paged ? "tracker_workspace_manifest" : "tracker_read_workspace", {
         p_owner: owner,
         p_known_version: version ?? null,
       });
       if (!result) throw new RequestError("ログインし直してください。", 401);
-      return result;
+      return paged && result.state ? { ...result, history_paged: true } : result;
     }
     case "get": {
       const [row, job, quota] = await Promise.all([
@@ -221,47 +147,85 @@ export async function dispatch(
           (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)))
       ) throw new RequestError("取得設定を確認してください。");
       if (body.excluded?.length > 2000) throw new RequestError("除外ショップが多すぎます。");
-      const result = await mutateWithVersion(admin, owner, (data) => {
-        if (Array.isArray(body.excluded)) {
-          const known = new Set(shopList(data).map((s: any) => s.key));
-          data.excluded = [
-            ...new Set(body.excluded.filter((key: unknown) => typeof key === "string" && known.has(key))),
-          ];
-        }
-        if (body.settings) {
-          const { interval, max_shops } = body.settings;
-          if (
-            !Number.isInteger(interval) || interval < 3 || interval > 30 || ![10, 15, 20].includes(max_shops)
-          ) throw new RequestError("取得設定を確認してください。");
-          const daily_enabled = body.settings.daily_enabled ?? data.settings.daily_enabled ?? true;
-          const daily_hour = body.settings.daily_hour ?? data.settings.daily_hour ?? 9;
-          if (
-            typeof daily_enabled !== "boolean" || !Number.isInteger(daily_hour) || daily_hour < 0 ||
-            daily_hour > 23
-          ) throw new RequestError("自動更新の時刻を確認してください。");
-          const comparison_point = body.settings.comparison_point === undefined
-            ? comparisonPoint(data)
-            : body.settings.comparison_point;
-          if (
-            comparison_point !== INITIAL_POINT &&
-            !(typeof comparison_point === "string" &&
-              data.snapshots.some((s: any) => s.id === comparison_point))
-          ) throw new RequestError("比較する保存時点を確認してください。");
-          const fallback_enabled = body.settings.fallback_enabled ?? data.settings.fallback_enabled ?? true;
-          if (typeof fallback_enabled !== "boolean") {
-            throw new RequestError("代替参考価格の設定を確認してください。");
+      if (
+        body.shop_changes !== undefined &&
+        (!Array.isArray(body.shop_changes) || body.shop_changes.length > 2000 ||
+          body.shop_changes.some((entry: unknown) =>
+            !Array.isArray(entry) || entry.length !== 2 ||
+            typeof entry[0] !== "string" || entry[0].length > 250 || typeof entry[1] !== "boolean"
+          ))
+      ) {
+        throw new RequestError("ショップの変更内容を確認してください。");
+      }
+      const result = await mutateWithVersion(
+        admin,
+        owner,
+        async (data) => {
+          const point = body.settings?.comparison_point;
+          const keys = [
+            ...new Set([
+              ...(body.excluded ?? []),
+              ...(body.shop_changes ?? []).map(([key]: [string]) => key),
+            ]),
+          ]
+            .filter((key) => typeof key === "string" && key.length <= 250);
+          const validated = paged && (keys.length || (point && point !== INITIAL_POINT))
+            ? await rpc(admin, "tracker_preference_keys", {
+              p_owner: owner,
+              p_snapshot: point ?? null,
+              p_keys: keys,
+            })
+            : null;
+          if (body.excluded || body.shop_changes) {
+            const known = new Set(validated?.shops ?? shopList(data).map((s: any) => s.key));
+            const excluded = new Set<string>(
+              body.excluded ? body.excluded.filter((key: unknown) => known.has(key)) : data.excluded,
+            );
+            for (const [key, checked] of body.shop_changes ?? []) {
+              if (!checked) excluded.delete(key);
+              else if (known.has(key)) excluded.add(key);
+            }
+            if (excluded.size > 2000) throw new RequestError("除外ショップが多すぎます。");
+            data.excluded = [...excluded];
           }
-          data.settings = {
-            interval,
-            max_shops,
-            daily_enabled,
-            daily_hour,
-            comparison_point,
-            fallback_enabled,
-          };
-        }
-        return data;
-      }, true);
+          if (body.settings) {
+            const { interval, max_shops } = { ...data.settings, ...body.settings };
+            if (
+              !Number.isInteger(interval) || interval < 3 || interval > 30 ||
+              ![10, 15, 20].includes(max_shops)
+            ) throw new RequestError("取得設定を確認してください。");
+            const daily_enabled = body.settings.daily_enabled ?? data.settings.daily_enabled ?? true;
+            const daily_hour = body.settings.daily_hour ?? data.settings.daily_hour ?? 9;
+            if (
+              typeof daily_enabled !== "boolean" || !Number.isInteger(daily_hour) || daily_hour < 0 ||
+              daily_hour > 23
+            ) throw new RequestError("自動更新の時刻を確認してください。");
+            const comparison_point = body.settings.comparison_point === undefined
+              ? data.settings.comparison_point ?? INITIAL_POINT
+              : body.settings.comparison_point;
+            if (
+              comparison_point !== INITIAL_POINT &&
+              point !== undefined && !(typeof comparison_point === "string" &&
+                (validated?.snapshot ?? data.snapshots.some((s: any) => s.id === comparison_point)))
+            ) throw new RequestError("比較する保存時点を確認してください。");
+            const fallback_enabled = body.settings.fallback_enabled ?? data.settings.fallback_enabled ?? true;
+            if (typeof fallback_enabled !== "boolean") {
+              throw new RequestError("代替参考価格の設定を確認してください。");
+            }
+            data.settings = {
+              interval,
+              max_shops,
+              daily_enabled,
+              daily_hour,
+              comparison_point,
+              fallback_enabled,
+            };
+          }
+          return data;
+        },
+        true,
+        paged,
+      );
       return body.include_state === false
         ? { previous_version: result.previous_version, version: result.version }
         : { state: result.state };
@@ -281,7 +245,7 @@ export async function dispatch(
       const selected = new Set(ids);
       const url = mode === "custom" ? validateInput(() => categoryURL(body.url)) : null;
       return {
-        state: await mutate(admin, owner, (state) => {
+        state: await mutate((state) => {
           const products = activeProducts(state).filter((p: any) => selected.has(p.id));
           if (products.length !== selected.size) throw new RequestError("登録商品が見つかりません。");
           for (const product of products) {
@@ -294,7 +258,7 @@ export async function dispatch(
     }
     case "groups": {
       let group_id;
-      const state = await mutate(admin, owner, (state) => {
+      const state = await mutate((state) => {
         group_id = validateInput(() => editGroups(state, body));
         return state;
       });
@@ -307,7 +271,7 @@ export async function dispatch(
         throw new RequestError("商品URLは一度に100件まで登録できます。");
       }
       const addedURLs = kind === "add" ? validateInput(() => body.urls.map(canonicalURL)) : [];
-      const { data: state } = await readState(admin, owner);
+      const { data: state } = await workingState(admin, owner, paged);
       const existing = new Set(activeProducts(state).map((p: any) => p.url));
       const group_id = kind === "add" ? validateInput(() => requireGroup(state, body.group_id)) : undefined;
       const requested = kind === "add" ? [...new Set<string>(addedURLs)] : [...existing];
@@ -315,7 +279,7 @@ export async function dispatch(
       const urls = kind === "add" ? requested.filter((url) => !existing.has(url)) : requested;
       const existing_urls = kind === "add" ? requested.filter((url) => existing.has(url)) : [];
       if (kind === "add" && !urls.length) {
-        const next = await mutate(admin, owner, (data) => {
+        const next = await mutate((data) => {
           if (!addProductsToGroup(data, existing_urls, validateInput(() => requireGroup(data, group_id)))) {
             throw new RequestError("選んだグループに登録済みです。");
           }
@@ -333,151 +297,11 @@ export async function dispatch(
         quota: await rpc(admin, "tracker_manual_update_quota", { p_owner: owner }),
       };
     }
-    case "step": {
-      const jobID = validID(body.job_id),
-        job = await rpc(admin, "tracker_claim_step", { p_owner: owner, p_job: jobID });
-      if (job.busy) return { busy: true, retry_after: job.retry_after };
-      if (job.status !== "running") {
-        return { state: (await readState(admin, owner)).data, job: publicJob(job) };
-      }
-      const payload = clone(job.payload), url = payload.urls[payload.index];
-      let stopped = false;
-      const reserve = async (seconds: number) => {
-        try {
-          const delay = await rpc(admin, "tracker_reserve_account_request", {
-            p_owner: owner,
-            p_origin: job.origin === "daily" ? "daily" : "manual",
-            p_seconds: Math.max(3, Math.ceil(seconds)),
-          });
-          if (delay > 0) await sleep(delay);
-        } catch (error) {
-          if (error instanceof RequestError && error.message === fetchBudgetError) {
-            throw new PriceError(fetchBudgetError, true);
-          }
-          throw error;
-        }
-      };
-      const fallbackState = payload.pendingFallback ? (await readState(admin, owner)).data : null;
-      if (
-        fallbackState && (fallbackState.settings.fallback_enabled === false ||
-          !["auto", "custom"].includes(fallbackState.products.find((p: any) => p.url === url)?.fallback_mode))
-      ) {
-        const { error, metadata } = payload.pendingFallback;
-        payload.results.push({ url, error, metadata });
-        payload.pendingFallback = null;
-        payload.index++;
-      } else if (payload.pendingFallback) {
-        const result = await advanceFallback(
-          payload.pendingFallback,
-          payload.settings,
-          reserve,
-          productFetcher,
-          categoryFetcher,
-        );
-        stopped = result.stopped;
-        if (result.done) {
-          payload.results.push(result.result);
-          payload.pendingFallback = null;
-          payload.index++;
-        }
-      } else if (url) {
-        try {
-          const data = await productFetcher(
-            url,
-            payload.settings.max_shops,
-            payload.settings.interval,
-            reserve,
-          );
-          payload.results.push({ url, data });
-        } catch (error) {
-          stopped = error instanceof PriceError && error.blocked;
-          const message = error instanceof PriceError || error instanceof RequestError
-            ? error.message.slice(0, 1000)
-            : "取得に失敗しました。";
-          const metadata = error instanceof PriceError ? error.metadata : null;
-          const state = (await readState(admin, owner)).data;
-          const product = state.products.find((p: any) => p.url === url);
-          const searchURL = !stopped && state.settings.fallback_enabled !== false &&
-            productFallbackURL({
-              ...product,
-              ...(metadata?.category_url ? { auto_fallback_url: metadata.category_url } : {}),
-              name: metadata?.name || product?.name,
-            });
-          if (searchURL) {
-            payload.pendingFallback = {
-              url,
-              search_url: searchURL,
-              error: message,
-              metadata,
-              original_name: metadata?.name || product?.name || url.split("/").at(-2),
-              image_url: product?.image_url ?? null,
-              index: 0,
-              failed: 0,
-              offers: [],
-            };
-          } else payload.results.push({ url, error: message, metadata });
-        }
-        if (!payload.pendingFallback) payload.index++;
-      }
-      if (stopped) {
-        const message = payload.results.at(-1)?.error?.includes(fetchBudgetError)
-          ? fetchBudgetError
-          : "アクセス制限を受けたため、今回の残りの取得を停止しました。";
-        while (payload.index < payload.urls.length) {
-          payload.results.push({
-            url: payload.urls[payload.index++],
-            error: message,
-          });
-        }
-      }
-      if (payload.pendingFallback || payload.index < payload.urls.length) {
-        const ok = await rpc(admin, "tracker_save_step", {
-          p_owner: owner,
-          p_job: jobID,
-          p_token: job.lease_token,
-          p_payload: payload,
-        });
-        if (!ok) throw new RequestError("更新は中止されたか、別の画面で処理されています。", 409);
-        return { job: publicJob({ ...job, payload }) };
-      }
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const row = await readState(admin, owner),
-          state = applyResults(
-            row.data,
-            job.kind === "add" && payload.group_id !== undefined
-              ? payload.results.map((result: any) => ({ ...result, group_id: payload.group_id }))
-              : payload.results,
-            job.origin === "daily" ? "daily" : job.kind,
-            job.created_at,
-          );
-        if (job.kind === "add" && payload.existing_urls?.length) {
-          const group = productGroups(state).some((g) => g.id === payload.group_id)
-            ? payload.group_id
-            : DEFAULT_GROUP;
-          addProductsToGroup(state, payload.existing_urls, group);
-        }
-        const completedPayload = {
-          ...payload,
-          results: payload.results.filter((r: any) => r.error).map((r: any) => ({
-            url: r.url,
-            error: r.error,
-          })),
-        };
-        const ok = await rpc(admin, "tracker_finish_job", {
-          p_owner: owner,
-          p_job: jobID,
-          p_token: job.lease_token,
-          p_expected: row.version,
-          p_data: state,
-          p_payload: completedPayload,
-        });
-        if (ok) return { state, job: publicJob({ ...job, payload, status: "completed" }) };
-      }
-      throw new RequestError("変更が重なりました。更新を再開してください。", 409);
-    }
+    case "step":
+      return await stepJob(admin, owner, validID(body.job_id), paged, productFetcher, categoryFetcher);
     case "cancel": {
       await rpc(admin, "tracker_cancel_job", { p_owner: owner, p_job: validID(body.job_id) });
-      return await dispatch(admin, owner, { action: "get" });
+      return await dispatch(admin, owner, paged ? { action: "workspace", paged } : { action: "get" });
     }
     case "archive": {
       if (
@@ -485,7 +309,7 @@ export async function dispatch(
       ) {
         throw new RequestError("削除する商品を選択してください。");
       }
-      return { state: await mutate(admin, owner, (state) => archiveProducts(state, body.ids)) };
+      return { state: await mutate((state) => archiveProducts(state, body.ids)) };
     }
     case "html": {
       if (typeof body.html !== "string" || body.html.length > 1000000) {
@@ -493,7 +317,7 @@ export async function dispatch(
       }
       const url = validateInput(() => canonicalURL(body.url));
       return {
-        state: await mutate(admin, owner, (state) => {
+        state: await mutate((state) => {
           if (
             !state.products.some((p: any) => p.url === url && !p.archived_at) &&
             activeProducts(state).length >= 100

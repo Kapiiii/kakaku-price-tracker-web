@@ -30,7 +30,7 @@ if (window.self === window.top) {
     ]);
   }
   try {
-    if (tracker) await import("./app.js?v=skeleton-ui");
+    if (tracker) await import("./app.js?v=history-pages");
     else await import("./share-view.js?v=performance");
   } catch {
     const target = document.querySelector(tracker ? "#app" : "#shared-content");

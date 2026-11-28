@@ -18,8 +18,9 @@ const identity = (name: string, url: string) => {
 };
 function price(value: string): number | null {
   const t = value.normalize("NFKC");
-  if (t.includes(".")) return null;
-  const n = Number(t.match(/\d[\d,]*/)?.[0].replaceAll(",", ""));
+  const amount = t.match(/[-+.]?\d[\d,.]*/)?.[0];
+  if (!amount || !/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.0+)?$/.test(amount)) return null;
+  const n = Number(amount.replaceAll(",", ""));
   return Number.isSafeInteger(n) && n > 0 && n < 1e12 ? n : null;
 }
 export function decodeHTML(bytes: Uint8Array): string {

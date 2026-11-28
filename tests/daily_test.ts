@@ -21,6 +21,7 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
   try {
     await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
       create schema auth; create table auth.users(id uuid primary key);
+      create schema tracker_private;
       create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
       grant usage on schema public,auth to anon,authenticated,service_role;
       create schema vault; create table vault.secrets(name text primary key,secret text);
@@ -68,6 +69,7 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
         "20261103095704_account_deletion.sql",
         "20261106144459_restrict_tracker_and_scheduler_access.sql",
         "20261125064528_workspace_performance.sql",
+        "20261128080243_split_tracker_history.sql",
       ]
     ) {
       await db.exec(await Deno.readTextFile(new URL(`../supabase/migrations/${migration}`, import.meta.url)));
@@ -107,6 +109,10 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
       },
     };
     const sql = async (query: string, args: unknown[] = []) => (await db.query<any>(query, args)).rows;
+    equal(
+      (await sql("select schedule from cron.job where jobname='price-note-daily-worker'"))[0].schedule,
+      "20 seconds",
+    );
     const rpc = async (name: string, args: Record<string, unknown>) => {
       const r = await admin.rpc(name, args);
       if (r.error) throw Error(r.error.message);
@@ -189,7 +195,8 @@ Deno.test("daily scheduler: JST dates, once per day, off switch, locks, authenti
         offers: [{ shop_key: "a", shop_name: "店舗A", price: 1000 }],
       };
     };
-    const process = (a: any, o: string, b: any) => dispatch(a, o, b, fetchPrice as any);
+    const process = (a: any, o: string, jobID: string) =>
+      dispatch(a, o, { action: "step", job_id: jobID, paged: true }, fetchPrice as any);
     const runNext = async () => {
       const queued = await nextRequest();
       return await dailyHandler(

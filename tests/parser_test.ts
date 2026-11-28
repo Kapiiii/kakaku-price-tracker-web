@@ -33,6 +33,13 @@ Deno.test("JSON-LD seller offers supported, aggregate-only price rejected", () =
   );
   throws(() => parseProduct(ld({ "@type": "AggregateOffer", lowPrice: 1000 }), url));
   throws(() => parseProduct(ld({ price: 1000, priceCurrency: "USD", seller: { name: "店" } }), url));
+  for (const price of ["12800", "12800.00", "12,800.0"]) {
+    equal(
+      parseProduct(ld({ price, priceCurrency: "JPY", seller: { name: "店" } }), url).offers[0].price,
+      12800,
+    );
+  }
+  throws(() => parseProduct(ld({ price: "12800.01", priceCurrency: "JPY", seller: { name: "店" } }), url));
 });
 Deno.test("mismatching product HTML and access challenge never become prices", () => {
   throws(() => parseProduct(page(item(1)).replace(url, "https://kakaku.com/item/K0000000002/"), url));
